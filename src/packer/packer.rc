@@ -1,0 +1,9 @@
+// hnxpack resources: the manifest only.
+//
+// longPathAware is the load-bearing setting here. Without it std::filesystem
+// cannot walk a source tree containing paths past 260 characters, so the packer
+// would fail on trees the stub can extract without trouble.
+
+#include <windows.h>
+
+1 RT_MANIFEST "packer.manifest"
