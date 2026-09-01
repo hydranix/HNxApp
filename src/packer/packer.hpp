@@ -295,11 +295,32 @@ bool hideOwnConsole();
 // user some other way, since nothing written to stdout or stderr is visible.
 [[nodiscard]] bool consoleHidden();
 
+// --- cmdline.cpp ------------------------------------------------------------
+
+// Recognises `hnxpack --src DIR`: the interactive flow with its first question
+// already answered.
+//
+// Returns the directory only when --src and its value are the whole command
+// line. --no-console is tolerated, since this form implies it anyway.
+//
+// Deliberately strict, and the strictness is the point. Anything else present
+// means a scripted invocation, and dropping one of those into a modal dialog
+// would hang a build server with nothing written anywhere to say why.
+[[nodiscard]] std::optional<std::filesystem::path> presetSourceFromArgs(
+    int argc, const wchar_t* const* argv);
+
 // --- interactive.cpp --------------------------------------------------------
 
-// The no-argument flow: pick a source folder, pick the entry point inside it,
+// The interactive flow: pick a source folder, pick the entry point inside it,
 // then pick where to save. Returns a process exit code.
-[[nodiscard]] int runInteractive();
+//
+// `presetSource` answers the first question up front, which is what
+// `hnxpack --src DIR` passes; the flow then starts at the entry point. Sharing
+// one function rather than growing a second beside it is what keeps the
+// containment rule, the derived metadata and the save dialog identical across
+// both entry points.
+[[nodiscard]] int runInteractive(
+    const std::optional<std::filesystem::path>& presetSource = std::nullopt);
 
 // True when this process can actually show a dialog. A packer invoked from CI
 // with no arguments must print usage rather than block forever on a window

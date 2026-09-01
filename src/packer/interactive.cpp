@@ -1,9 +1,12 @@
-// The no-argument flow.
+// The interactive flow.
 //
 //   1. pick the application folder
 //   2. pick the entry point, starting inside that folder
 //   3. pick where to save, defaulting to the folder's name plus .exe, in
 //      whichever directory was used last time
+//
+// Reached with no arguments at all, or with `hnxpack --src DIR`, which answers
+// the first question up front and starts at step 2.
 //
 // Metadata, icons, version strings and the stub architecture are all derived from
 // what the user picked, so a working package comes out without ever writing a
@@ -73,7 +76,7 @@ bool canShowDialogs() {
     return (flags.dwFlags & WSF_VISIBLE) != 0;
 }
 
-int runInteractive() {
+int runInteractive(const std::optional<fs::path>& presetSource) {
     // Checked before the first dialog, not at the end.
     //
     // The failure this guards against was exactly the opposite: the user answered
@@ -96,29 +99,57 @@ int runInteractive() {
     }
 
     // --- 1. the application folder -----------------------------------------
-    auto sourceDir = pickFolder(nullptr, L"Select the application folder to package",
-                                loadSetting(SETTING_LAST_SOURCE_DIR));
-    if (!sourceDir) return 1;  // cancelled
+    //
+    // Skipped entirely when the caller already has an answer: `hnxpack --src DIR`
+    // is this flow starting at question 2.
+    std::optional<fs::path> sourceDir = presetSource;
+    if (!sourceDir) {
+        sourceDir = pickFolder(nullptr, L"Select the application folder to package",
+                               loadSetting(SETTING_LAST_SOURCE_DIR));
+        if (!sourceDir) return 1;  // cancelled
+    }
 
     std::error_code ec;
     if (!fs::is_directory(*sourceDir, ec)) {
-        report(L"HNx", L"That is not a folder.", MB_ICONERROR);
+        // Worth naming the path. The picker cannot really produce a non-folder,
+        // so in practice this fires for a --src that was typed, and a bare "that
+        // is not a folder" leaves the user guessing which part was wrong.
+        std::wstring msg = L"That is not a folder.\n\n";
+        msg += sourceDir->wstring();
+        report(L"HNx", msg, MB_ICONERROR);
+        std::println(stderr, "hnxpack: not a folder: {}",
+                     paths::narrow(sourceDir->wstring()));
         return 1;
     }
 
-    saveSetting(SETTING_LAST_SOURCE_DIR, sourceDir->parent_path().wstring());
+    // Made absolute here rather than further down, because the entry-point
+    // dialog below is handed this as its start directory and resolves a parsing
+    // name, not a relative path -- and `--src .\MyApp` is an ordinary thing to
+    // type.
+    const fs::path sourceAbs = fs::weakly_canonical(*sourceDir, ec);
+    if (ec || sourceAbs.empty()) {
+        report(L"HNx", L"Could not resolve that folder path.", MB_ICONERROR);
+        std::println(stderr, "hnxpack: cannot resolve: {}",
+                     paths::narrow(sourceDir->wstring()));
+        return 1;
+    }
+
+    // Only remembered when it came from the picker. The setting exists to put
+    // that dialog back where it was last used, and a path passed on the command
+    // line is no evidence about where the user browses.
+    if (!presetSource)
+        saveSetting(SETTING_LAST_SOURCE_DIR, sourceAbs.parent_path().wstring());
 
     // --- 2. the entry point, inside that folder -----------------------------
     auto execFile = pickProgramFile(
         nullptr, L"Select the program to run when this package starts",
-        sourceDir->wstring(), /*forceStartDir=*/true);
+        sourceAbs.wstring(), /*forceStartDir=*/true);
     if (!execFile) return 1;
 
     // The entry point has to live inside the packaged folder: it is stored as a
     // path relative to the extracted tree, so a file from elsewhere would simply
     // not exist at runtime. The dialog opens in the right place but does not stop
     // the user navigating away.
-    const fs::path sourceAbs = fs::weakly_canonical(*sourceDir, ec);
     const fs::path execAbs = fs::weakly_canonical(*execFile, ec);
 
     if (!paths::isContainedIn(sourceAbs.wstring(), execAbs.wstring())) {

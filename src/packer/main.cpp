@@ -1,6 +1,7 @@
 // hnxpack: builds, inspects and verifies HNx packaged executables.
 //
 //   hnxpack                  interactive: pick a folder, an entry point, a destination
+//   hnxpack --src DIR        the same, starting at the entry point
 //   hnxpack build   --src DIR --out EXE [--stub EXE] [--config JSON] ...
 //   hnxpack inspect EXE
 //   hnxpack verify  EXE
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -182,6 +184,10 @@ void usage() {
         "  hnxpack               with no arguments, asks for a folder, an entry\n"
         "                        point and a destination\n"
         "\n"
+        "  hnxpack --src DIR     the same three questions with the first one\n"
+        "                        already answered: asks only for the entry point\n"
+        "                        and the destination\n"
+        "\n"
         "  hnxpack build --src DIR --out EXE [options]\n"
         "      --arch NAME       x64 | x86  (default: matched to the entry\n"
         "                        point, x64 if it is not a PE image)\n"
@@ -228,13 +234,22 @@ int wmain(int argc, wchar_t** argv) {
     // Hiding it automatically matters because a double-click cannot pass a flag.
     const bool interactiveFlow = (argc < 2);
 
-    if (noConsole || interactiveFlow) hideOwnConsole();
+    // `hnxpack --src DIR` is the same flow with its first question answered.
+    // Recognised here rather than under `build`, because `build` is the scripted
+    // path where blocking on a dialog would be exactly the wrong thing to do.
+    const std::optional<fs::path> presetSource = presetSourceFromArgs(argc, argv);
 
-    if (interactiveFlow) {
+    // The shorthand gets the same console treatment as the no-argument flow, and
+    // for the same reason: it is what a shell verb or a "send to" shortcut would
+    // pass, neither of which can add a flag. hideOwnConsole only ever hides a
+    // console this process owns, so a terminal it was typed into is left alone.
+    if (noConsole || interactiveFlow || presetSource) hideOwnConsole();
+
+    if (interactiveFlow || presetSource) {
         // Guarded on there actually being a desktop: a packer run from CI with no
         // arguments must print usage rather than block forever on a dialog nobody
         // can see.
-        if (canShowDialogs()) return runInteractive();
+        if (canShowDialogs()) return runInteractive(presetSource);
         usage();
         return 2;
     }

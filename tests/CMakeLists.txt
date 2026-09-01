@@ -9,12 +9,14 @@ add_executable(hnx_tests
     test_toc.cpp
     test_footer.cpp
     test_interactive.cpp
+    test_cmdline.cpp
 
     ${CMAKE_SOURCE_DIR}/src/stub/meta.cpp
     ${CMAKE_SOURCE_DIR}/src/stub/toc.cpp
     ${CMAKE_SOURCE_DIR}/src/stub/selfmap.cpp
     ${CMAKE_SOURCE_DIR}/src/stub/codec/codec.cpp
     ${CMAKE_SOURCE_DIR}/src/packer/appid.cpp
+    ${CMAKE_SOURCE_DIR}/src/packer/cmdline.cpp
     ${CMAKE_SOURCE_DIR}/src/packer/walk.cpp
     ${CMAKE_SOURCE_DIR}/src/packer/console.cpp
 )

@@ -283,4 +283,26 @@ if(NOT HNX_STUB_ONLY)
         add_subdirectory(tests)
     endif()
 
+    # -----------------------------------------------------------------------
+    # Install
+    #
+    # Only the two user-facing programs. The stubs are already resources inside
+    # both of them, so installing loose hnxstub binaries beside them would be
+    # dead weight -- and would imply the packer looks for one on disk, which is
+    # exactly the behaviour the embedded stubs replaced.
+    #
+    # bin/ rather than the CMake-on-Windows default of putting runtimes at the
+    # prefix root, so the install prefix can be added to PATH without also
+    # putting the prefix's other contents there.
+    #
+    # PDBs are installed alongside as OPTIONAL: a Release build with /Zi has
+    # them, one without simply installs nothing rather than failing.
+    # -----------------------------------------------------------------------
+    install(TARGETS hnxpack HNxPacker
+            RUNTIME DESTINATION bin)
+
+    install(FILES $<TARGET_PDB_FILE:hnxpack> $<TARGET_PDB_FILE:HNxPacker>
+            DESTINATION bin
+            OPTIONAL)
+
 endif()

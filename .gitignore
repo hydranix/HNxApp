@@ -1,5 +1,6 @@
 # Build output
 build/
+build-release/
 out/
 install/
 
@@ -48,6 +49,9 @@ third_party/*
 *.pfx
 *.p12
 *.snk
+
+# Local agent guidance. Kept on disk and followed; deliberately not published.
+CLAUDE.md
 
 # Editors and OS
 .idea/

@@ -16,6 +16,7 @@ add_library(hnxpack_core STATIC
     patch_rsrc.cpp
     icons.cpp
     appid.cpp
+    cmdline.cpp
     embedded_stub.cpp
     console.cpp
     dialogs.cpp

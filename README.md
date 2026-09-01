@@ -56,7 +56,15 @@ from the entry point's `VERSIONINFO`, the icon from its resources, and the stub
 architecture from its PE machine type. Cancelling any dialog exits without
 writing anything.
 
-If there is no desktop — CI, a service — the no-argument form prints usage
+`hnxpack --src DIR` is the same flow with the first question already answered,
+so it asks only for the entry point and the destination. The shorthand is
+recognised only when `--src` and its value are the whole command line: anything
+else alongside it — a `build` subcommand, an `--out`, a second `--src` — is a
+scripted invocation, and dropping one of those into a modal dialog would hang a
+build with nothing printed to say why. `--no-console` is the one exception, since
+this form implies it anyway.
+
+If there is no desktop — CI, a service — these interactive forms print usage
 instead of blocking on a dialog nobody can see.
 
 For scripted builds:
@@ -235,14 +243,16 @@ does not reach a terminal the stub was launched from.
 Working: the container format, packer, stub, extraction, the skip ladder,
 launching with shell fallback, cross-process locking, the progress UI,
 Authenticode signing, long paths, Unicode, `--hnx-clean` orphan pruning,
-`singleInstance`, the no-argument interactive flow, icon/version branding, and
+`singleInstance`, the interactive flow and its `--src DIR` shorthand,
+icon/version branding, and
 x64/x86 stubs embedded in the packer with the architecture matched to the entry
 point.
 
 The three-dialog chain is the one part not covered by an automated test — dialogs
-cannot be driven headlessly. Its pure logic (`sanitizeAppId`) is unit tested, and
-the first dialog and the cancel path are verified, but a full pick-pick-save run
-is a manual check.
+cannot be driven headlessly. Its pure logic is unit tested — `sanitizeAppId`, and
+which command lines select the flow at all (`presetSourceFromArgs`, the guard
+that keeps a scripted build out of a modal dialog) — and the first dialog and the
+cancel path are verified, but a full pick-pick-save run is a manual check.
 
 Not yet done: ARM64 stubs, LZMA and Brotli codecs (ids are reserved), and zstd
 dictionaries — the `dictId` field exists in the block descriptor specifically so
