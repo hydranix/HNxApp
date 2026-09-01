@@ -71,4 +71,12 @@ struct PruneResult {
 [[nodiscard]] std::expected<PruneResult, Error> pruneOrphans(std::wstring_view targetDir,
                                                              const Toc& toc);
 
+// Deletes the target tree and everything in it, .hnx included. Used by
+// waitMode wait-and-clean once the application has exited.
+//
+// Best effort by design: the application may still hold a handle to something
+// under the tree, and failing to remove a cache directory is not a failure worth
+// surfacing to the user.
+void removeTree(std::wstring_view targetDir);
+
 }  // namespace hnx

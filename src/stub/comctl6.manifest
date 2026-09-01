@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+
+  <!-- Common Controls v6, deliberately NOT part of the stub's process manifest.
+
+       A dependency declared there is resolved by the loader before any of our
+       code runs, so on a Windows image whose side-by-side store has no
+       Common-Controls 6 assembly the process would fail to start outright, with
+       nothing left inside it able to say why. WinPE is the image that motivates
+       this.
+
+       Loaded on demand instead, through CreateActCtxW in ui.cpp, where failing
+       is allowed: the progress bar then renders in the classic style rather than
+       the themed one, which is what an unthemed environment would have shown
+       anyway. -->
+
+  <assemblyIdentity type="win32" name="HNx.Stub.CommonControls" version="1.0.0.0"
+                    processorArchitecture="*"/>
+
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls"
+                        version="6.0.0.0" processorArchitecture="*"
+                        publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+
+</assembly>

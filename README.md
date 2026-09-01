@@ -181,6 +181,52 @@ Any argument starting with `--hnx-` is consumed by the stub and not forwarded
 --hnx-help
 ```
 
+## Running under WinPE
+
+Packaged applications run in WinPE. The stub links the static CRT and imports
+only `kernel32`, `user32`, `gdi32`, `shell32` and `advapi32`, all of which a base
+WinPE image has. Two things there are not like a normal Windows session.
+
+**There are no profile directories.** WinPE defines neither `%LOCALAPPDATA%` nor
+the rest, so the default `targetDir` expands to itself and resolves against the
+current directory — leaving a folder named, literally, `%LOCALAPPDATA%` wherever
+the package happened to be run from. Under WinPE a target that does not resolve
+to an absolute path goes to `%TEMP%` instead, or to `X:\Windows\Temp` when even
+that is unset. The test is on the result rather than on the template, so a
+`targetDir` naming a real location — `D:\apps\%APPID%` — is still used as
+written, and an explicit `--hnx-target=` is never second-guessed.
+
+**X: is a RAM disk** with 32 MB of scratch space by default and 512 MB at most,
+so running out of room is the ordinary failure there rather than an exotic one.
+Free space is checked against the payload before the first byte is written,
+which is the difference between one message and a half-written tree:
+
+```
+not enough free space to unpack: X:\Windows\Temp\HNx\my-app\1.0 needs 180 MB, 27 MB free
+```
+
+Raise it when building the image (`Dism /Set-ScratchSpace:512`), or send the
+package to a real disk with `--hnx-target=D:\apps`.
+
+`requireAdmin` is ignored under WinPE. Everything there already runs as SYSTEM
+and there is no consent UI for the `runas` verb to reach, so honouring it would
+only turn a launch that would have worked into one that fails.
+
+Two dependencies were dropped rather than assumed. `SHFileOperationW`, which
+`wait-and-clean` used to delete the tree, is a shell service; the teardown now
+uses the same directory walk that backs `--hnx-clean`. And Common Controls v6 is
+no longer declared in the stub's manifest: a manifest dependency is resolved by
+the loader *before* any of our code runs, so an image whose side-by-side store
+lacks the assembly would fail to start the process outright, with nothing left
+inside it able to report why. It is activated at the point of use instead —
+`CreateActCtxW` over a second manifest resource, and `comctl32` loaded with
+`LoadLibraryW` — which costs an image without it the progress bar's theming
+rather than costing the stub its ability to run.
+
+`hnxpack` is a separate question. Its own imports are all present in WinPE, but
+the GUI needs `d3d11.dll` and `D3DCOMPILER_47.dll`, which WinPE does not have.
+Build packages on a normal Windows machine.
+
 ## How the fast path works
 
 1. Read a 64-byte footer at the end of the file to find the archive.
@@ -244,15 +290,21 @@ Working: the container format, packer, stub, extraction, the skip ladder,
 launching with shell fallback, cross-process locking, the progress UI,
 Authenticode signing, long paths, Unicode, `--hnx-clean` orphan pruning,
 `singleInstance`, the interactive flow and its `--src DIR` shorthand,
-icon/version branding, and
+icon/version branding,
 x64/x86 stubs embedded in the packer with the architecture matched to the entry
-point.
+point, and running under WinPE.
 
 The three-dialog chain is the one part not covered by an automated test — dialogs
 cannot be driven headlessly. Its pure logic is unit tested — `sanitizeAppId`, and
 which command lines select the flow at all (`presetSourceFromArgs`, the guard
 that keeps a scripted build out of a modal dialog) — and the first dialog and the
 cancel path are verified, but a full pick-pick-save run is a manual check.
+
+The WinPE path has the same shape of gap: `winpe::active()` reports the
+environment the test process is running in and cannot be faked without writing to
+`HKLM`, so the two decisions that follow from it — `chooseScratchRoot` and
+`isAbsolute` — are unit tested directly and the redirect they drive is a manual
+check on a booted image.
 
 Not yet done: ARM64 stubs, LZMA and Brotli codecs (ids are reserved), and zstd
 dictionaries — the `dictId` field exists in the block descriptor specifically so

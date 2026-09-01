@@ -18,10 +18,63 @@ constexpr wchar_t kWindowClass[] = L"HNxProgressWindow";
 constexpr int kWidth = 420;
 constexpr int kHeight = 120;
 
+// The Common Controls v6 manifest embedded by stub.rc. Kept out of the process
+// manifest so that an image lacking the assembly -- WinPE -- costs us the
+// theming rather than the process.
+constexpr WORD kComCtl6ManifestId = 2;
+
 struct WindowState {
     Progress* owner = nullptr;
     HWND bar = nullptr;
     HWND label = nullptr;
+};
+
+// Activates the Common Controls v6 assembly for the calling thread, for as long
+// as this object lives. Every failure is silent and leaves the thread with
+// whatever comctl32 the system provides.
+class ComCtl6Context {
+public:
+    ComCtl6Context() {
+        ACTCTXW ctx{};
+        ctx.cbSize = sizeof(ctx);
+        ctx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
+        ctx.hModule = ::GetModuleHandleW(nullptr);
+        ctx.lpResourceName = MAKEINTRESOURCEW(kComCtl6ManifestId);
+
+        handle_ = ::CreateActCtxW(&ctx);
+        if (handle_ != INVALID_HANDLE_VALUE)
+            activated_ = ::ActivateActCtx(handle_, &cookie_) != FALSE;
+    }
+
+    ~ComCtl6Context() {
+        if (activated_) ::DeactivateActCtx(0, cookie_);
+        if (handle_ != INVALID_HANDLE_VALUE) ::ReleaseActCtx(handle_);
+    }
+
+    ComCtl6Context(const ComCtl6Context&) = delete;
+    ComCtl6Context& operator=(const ComCtl6Context&) = delete;
+
+private:
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+    ULONG_PTR cookie_ = 0;
+    bool activated_ = false;
+};
+
+// Owns a LoadLibraryW reference for a scope.
+class ModuleGuard {
+public:
+    explicit ModuleGuard(const wchar_t* name) : module_(::LoadLibraryW(name)) {}
+    ~ModuleGuard() {
+        if (module_) ::FreeLibrary(module_);
+    }
+
+    ModuleGuard(const ModuleGuard&) = delete;
+    ModuleGuard& operator=(const ModuleGuard&) = delete;
+
+    [[nodiscard]] HMODULE get() const noexcept { return module_; }
+
+private:
+    HMODULE module_ = nullptr;
 };
 
 LRESULT CALLBACK progressProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -121,8 +174,25 @@ void Progress::start(const std::wstring& appName, unsigned delayMs) {
         const DWORD w = ::WaitForSingleObject(readyEvent_, delayMs);
         if (w == WAIT_OBJECT_0 || done_.load(std::memory_order_relaxed)) return;
 
-        INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_PROGRESS_CLASS};
-        ::InitCommonControlsEx(&icc);
+        // comctl32 is loaded here rather than imported, for the same reason its
+        // manifest dependency is activated rather than declared: a missing
+        // comctl32 must cost this window its progress bar, not cost the whole
+        // stub its ability to load. The activation context comes first so that
+        // the load resolves to the v6 assembly where one exists.
+        const ComCtl6Context comctl6;
+
+        ModuleGuard comctl(L"comctl32.dll");
+        bool haveProgressBar = false;
+        if (comctl.get()) {
+            using InitCommonControlsExFn = BOOL(WINAPI*)(const INITCOMMONCONTROLSEX*);
+            const auto init = reinterpret_cast<InitCommonControlsExFn>(
+                reinterpret_cast<void*>(
+                    ::GetProcAddress(comctl.get(), "InitCommonControlsEx")));
+            if (init) {
+                INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_PROGRESS_CLASS};
+                haveProgressBar = init(&icc) != FALSE;
+            }
+        }
 
         HINSTANCE inst = ::GetModuleHandleW(nullptr);
 
@@ -153,11 +223,14 @@ void Progress::start(const std::wstring& appName, unsigned delayMs) {
         st.label = ::CreateWindowExW(0, L"STATIC", L"Preparing files...",
                                      WS_CHILD | WS_VISIBLE, 16, 12, kWidth - 48, 20,
                                      hwnd, nullptr, inst, nullptr);
-        st.bar = ::CreateWindowExW(0, PROGRESS_CLASSW, nullptr,
-                                   WS_CHILD | WS_VISIBLE, 16, 40, kWidth - 48, 22,
-                                   hwnd, nullptr, inst, nullptr);
-
-        ::SendMessageW(st.bar, PBM_SETRANGE32, 0, 1000);
+        // Without comctl32 there is no bar, and the label alone carries the
+        // percentage. That is a worse window, not a broken one.
+        if (haveProgressBar) {
+            st.bar = ::CreateWindowExW(0, PROGRESS_CLASSW, nullptr,
+                                       WS_CHILD | WS_VISIBLE, 16, 40, kWidth - 48, 22,
+                                       hwnd, nullptr, inst, nullptr);
+            ::SendMessageW(st.bar, PBM_SETRANGE32, 0, 1000);
+        }
 
         // The default GUI font; without this the label renders in the ancient
         // bitmap system font.
@@ -180,10 +253,12 @@ void Progress::start(const std::wstring& appName, unsigned delayMs) {
 
             const u64 total = total_bytes_.load(std::memory_order_relaxed);
             const u64 done = done_bytes_.load(std::memory_order_relaxed);
-            const int pos = total > 0
-                                ? static_cast<int>((done * 1000) / total)
-                                : 0;
-            ::SendMessageW(st.bar, PBM_SETPOS, static_cast<WPARAM>(pos), 0);
+            if (st.bar) {
+                const int pos = total > 0
+                                    ? static_cast<int>((done * 1000) / total)
+                                    : 0;
+                ::SendMessageW(st.bar, PBM_SETPOS, static_cast<WPARAM>(pos), 0);
+            }
 
             wchar_t buf[128];
             const unsigned pct = total > 0 ? static_cast<unsigned>((done * 100) / total) : 0;

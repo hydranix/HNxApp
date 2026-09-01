@@ -16,15 +16,10 @@
     </security>
   </trustInfo>
 
-  <!-- Common controls v6, needed for the progress bar to render in the modern
-       style rather than the Windows 95 one. -->
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls"
-                        version="6.0.0.0" processorArchitecture="*"
-                        publicKeyToken="6595b64144ccf1df" language="*"/>
-    </dependentAssembly>
-  </dependency>
+  <!-- Common Controls v6 is NOT declared here. It lives in comctl6.manifest and
+       is activated at runtime, so that an image without the assembly costs the
+       progress bar its theming rather than costing the stub its ability to
+       start at all. -->
 
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>

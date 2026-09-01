@@ -19,6 +19,7 @@ add_executable(hnxstub WIN32
     state.cpp
     launch.cpp
     ui.cpp
+    winpe.cpp
     codec/codec.cpp
     stub.rc
 )
@@ -30,8 +31,10 @@ target_link_libraries(hnxstub PRIVATE
     xxhash
 )
 
+# comctl32 is deliberately absent: ui.cpp loads it with LoadLibraryW so that an
+# image without it -- WinPE -- loses the progress bar rather than the process.
 target_link_libraries(hnxstub PRIVATE
-    kernel32 user32 shell32 advapi32 comctl32 shlwapi
+    kernel32 user32 shell32 advapi32 shlwapi
 )
 
 target_include_directories(hnxstub PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

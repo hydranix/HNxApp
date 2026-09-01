@@ -21,6 +21,17 @@
 1 RT_MANIFEST "stub.manifest"
 
 // ---------------------------------------------------------------------------
+// Common Controls v6, as a separate manifest the loader never looks at.
+//
+// Resource id 2 is ISOLATIONAWARE_MANIFEST_RESOURCE_ID, which the loader applies
+// automatically to DLLs and ignores for an executable. ui.cpp names it
+// explicitly when it builds an activation context, which is the whole point: a
+// dependency the loader resolves is fatal when it cannot be met, and one we
+// resolve ourselves is not.
+// ---------------------------------------------------------------------------
+2 RT_MANIFEST "comctl6.manifest"
+
+// ---------------------------------------------------------------------------
 // Version information
 //
 // Placeholder only. hnxpack replaces this wholesale with the RT_VERSION resource

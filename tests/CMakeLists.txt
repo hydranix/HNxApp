@@ -10,8 +10,10 @@ add_executable(hnx_tests
     test_footer.cpp
     test_interactive.cpp
     test_cmdline.cpp
+    test_winpe.cpp
 
     ${CMAKE_SOURCE_DIR}/src/stub/meta.cpp
+    ${CMAKE_SOURCE_DIR}/src/stub/winpe.cpp
     ${CMAKE_SOURCE_DIR}/src/stub/toc.cpp
     ${CMAKE_SOURCE_DIR}/src/stub/selfmap.cpp
     ${CMAKE_SOURCE_DIR}/src/stub/codec/codec.cpp

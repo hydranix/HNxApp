@@ -33,6 +33,7 @@
 #include "toc.hpp"
 #include "ui.hpp"
 #include "verify.hpp"
+#include "winpe.hpp"
 
 namespace hnx {
 namespace {
@@ -222,11 +223,30 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
         .version = meta->appVersion,
     };
 
+    const bool winPe = winpe::active();
+
     std::wstring targetDir = flags.haveTarget
                                  ? paths::expandTokens(flags.target, tokens)
                                  : paths::expandTokens(meta->targetDir, tokens);
     if (targetDir.empty())
         return std::unexpected(Error{Ec::MetaFieldInvalid, "targetDir resolved to nothing"});
+
+    // WinPE defines none of the profile variables, so the default targetDir --
+    // %LOCALAPPDATA%\HNx\%APPID%\%VERSION% -- expands to itself and resolves
+    // against the current directory, leaving a directory literally named
+    // "%LOCALAPPDATA%" wherever the package happened to be run from.
+    //
+    // Anything that did not resolve to an absolute path there goes to the WinPE
+    // scratch directory instead. The test is on the result rather than on the
+    // template, so a package that names a real location -- D:\apps\%APPID% --
+    // still gets it, and an explicit --hnx-target= is never second-guessed.
+    if (winPe && !flags.haveTarget && !winpe::isAbsolute(targetDir)) {
+        targetDir = winpe::scratchRoot();
+        targetDir.append(L"\\HNx\\");
+        targetDir.append(meta->appId);
+        targetDir.push_back(L'\\');
+        targetDir.append(meta->appVersion);
+    }
 
     // GetFullPathNameW makes a relative target (from --hnx-target) absolute
     // against the current directory, which is what a user typing one expects.
@@ -268,6 +288,25 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
     if (!plan) return std::unexpected(plan.error());
 
     if (!plan->nothingToDo()) {
+        // Free space is checked before the first write rather than discovered by
+        // a worker part-way through. Under WinPE the target is the X: RAM disk,
+        // whose scratch space is 32 MB by default, so a full volume is the
+        // ordinary failure there -- and a half-written tree plus a write error
+        // from one thread is a much worse way to learn about it.
+        //
+        // The lock has already created <target>\.hnx, so the path exists.
+        ULARGE_INTEGER freeBytes{};
+        if (::GetDiskFreeSpaceExW(targetDir.c_str(), &freeBytes, nullptr, nullptr) &&
+            freeBytes.QuadPart < plan->neededBytes) {
+            std::string ctx = paths::narrow(paths::toDisplayForm(targetDir));
+            ctx += " needs ";
+            ctx += std::to_string(plan->neededBytes / (1024 * 1024));
+            ctx += " MB, ";
+            ctx += std::to_string(freeBytes.QuadPart / (1024 * 1024));
+            ctx += " MB free";
+            return std::unexpected(Error{Ec::InsufficientSpace, std::move(ctx)});
+        }
+
         // Rebuild the disk paths for the extractor. buildPlan computes these
         // internally but does not hand them back, and recomputing is cheaper than
         // widening the interface for a path that only runs when work is needed.
@@ -380,7 +419,11 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
     opt.exePath = paths::toDisplayForm(*execPath);
     opt.workDir = paths::toDisplayForm(paths::expandTokens(meta->workDir, tokens));
     opt.showWindow = meta->showWindow;
-    opt.requireAdmin = meta->requireAdmin;
+    // requireAdmin is honoured by routing the launch through the shell with the
+    // runas verb. WinPE runs everything as SYSTEM and ships no consent UI, so
+    // there is nothing to elevate to and the request would only turn a launch
+    // that would have worked into one that fails.
+    opt.requireAdmin = meta->requireAdmin && !winPe;
     opt.waitMode = meta->waitMode;
 
     for (const auto& e : meta->env)
@@ -409,17 +452,11 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
     }
 
     if (meta->waitMode == WaitMode::WaitAndClean && launched->waited) {
-        // Best effort. The application may still hold a handle to something in
-        // the tree, and failing to remove a cache directory is not worth
-        // surfacing to the user as an error.
-        SHFILEOPSTRUCTW op{};
-        std::wstring from = targetDir;
-        from.push_back(L'\0');
-        from.push_back(L'\0');
-        op.wFunc = FO_DELETE;
-        op.pFrom = from.c_str();
-        op.fFlags = FOF_NO_UI | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
-        ::SHFileOperationW(&op);
+        // Deleted directly rather than through SHFileOperationW: that API is a
+        // shell service, and the shell is one of the parts a minimal Windows
+        // image such as WinPE does not necessarily bring. The walk this uses is
+        // the same one that backs --hnx-clean.
+        removeTree(targetDir);
     }
 
     return static_cast<int>(launched->exitCode);

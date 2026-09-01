@@ -176,8 +176,15 @@ namespace {
     return s;
 }
 
+// Walks `dirExtended` depth first, appending every entry as a path relative to
+// the walk root. Children are emitted before their parents, so deleting the
+// result in order empties a directory before trying to remove it.
+//
+// `keepMeta` preserves the .hnx bookkeeping directory. Pruning wants that -- it
+// runs while this process holds the lock file inside it -- and the wait-and-clean
+// teardown, which runs after the lock is released, does not.
 void collectTree(const std::wstring& dirExtended, const std::wstring& relPrefix,
-                 std::vector<std::pair<std::wstring, bool>>& out) {
+                 bool keepMeta, std::vector<std::pair<std::wstring, bool>>& out) {
     std::wstring pattern = dirExtended;
     pattern.append(L"\\*");
 
@@ -190,9 +197,7 @@ void collectTree(const std::wstring& dirExtended, const std::wstring& relPrefix,
         const std::wstring_view name{fd.cFileName};
         if (name == L"." || name == L"..") continue;
 
-        // Never descend into or remove our own bookkeeping directory: it holds
-        // the lock this very run is standing on.
-        if (relPrefix.empty() && name == L".hnx") continue;
+        if (keepMeta && relPrefix.empty() && name == L".hnx") continue;
 
         std::wstring rel = relPrefix;
         if (!rel.empty()) rel.push_back(L'\\');
@@ -208,11 +213,26 @@ void collectTree(const std::wstring& dirExtended, const std::wstring& relPrefix,
         // would walk outside the target entirely.
         const bool isReparse = (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 
-        if (isDir && !isReparse) collectTree(full, rel, out);
+        if (isDir && !isReparse) collectTree(full, rel, keepMeta, out);
         out.emplace_back(std::move(rel), isDir);
     } while (::FindNextFileW(h, &fd));
 
     ::FindClose(h);
+}
+
+// Removes one collected entry. A read-only file has its attribute cleared first:
+// the archive can carry read-only files, so a tree we extracted ourselves is a
+// tree DeleteFileW would otherwise refuse to remove.
+//
+// A directory that is not empty is left alone, which is what pruning wants -- it
+// still holds something the payload provides.
+[[nodiscard]] bool removeEntry(const std::wstring& extendedPath, bool isDir) {
+    if (isDir) return ::RemoveDirectoryW(extendedPath.c_str()) != FALSE;
+
+    const DWORD attrs = ::GetFileAttributesW(extendedPath.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY))
+        ::SetFileAttributesW(extendedPath.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
+    return ::DeleteFileW(extendedPath.c_str()) != FALSE;
 }
 
 }  // namespace
@@ -230,13 +250,11 @@ std::expected<PruneResult, Error> pruneOrphans(std::wstring_view targetDir,
     std::sort(expected.begin(), expected.end());
 
     std::vector<std::pair<std::wstring, bool>> present;
-    collectTree(std::wstring(paths::toExtendedForm(targetDir)), {}, present);
+    collectTree(std::wstring(paths::toExtendedForm(targetDir)), {}, true, present);
 
     PruneResult result;
     const std::wstring base = paths::toExtendedForm(targetDir);
 
-    // collectTree emits children before their parents, so deleting in order
-    // empties a directory before trying to remove it.
     for (const auto& [rel, isDir] : present) {
         if (std::binary_search(expected.begin(), expected.end(), foldCase(rel))) continue;
 
@@ -244,19 +262,31 @@ std::expected<PruneResult, Error> pruneOrphans(std::wstring_view targetDir,
         full.push_back(L'\\');
         full.append(rel);
 
-        if (isDir) {
-            if (::RemoveDirectoryW(full.c_str())) ++result.dirsDeleted;
-            // A non-empty directory means it still holds something the payload
-            // does provide, so leaving it is correct.
-        } else {
-            const DWORD attrs = ::GetFileAttributesW(full.c_str());
-            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY))
-                ::SetFileAttributesW(full.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
-            if (::DeleteFileW(full.c_str())) ++result.filesDeleted;
+        if (removeEntry(full, isDir)) {
+            if (isDir)
+                ++result.dirsDeleted;
+            else
+                ++result.filesDeleted;
         }
     }
 
     return result;
+}
+
+void removeTree(std::wstring_view targetDir) {
+    const std::wstring base = paths::toExtendedForm(targetDir);
+
+    std::vector<std::pair<std::wstring, bool>> present;
+    collectTree(base, {}, false, present);
+
+    for (const auto& [rel, isDir] : present) {
+        std::wstring full = base;
+        full.push_back(L'\\');
+        full.append(rel);
+        (void)removeEntry(full, isDir);
+    }
+
+    ::RemoveDirectoryW(base.c_str());
 }
 
 std::expected<ExtractResult, Error> extract(const SelfImage& image, const Toc& toc,
