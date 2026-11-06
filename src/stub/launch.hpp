@@ -90,4 +90,19 @@ struct LaunchResult {
 // spaces survives the round trip into the child.
 [[nodiscard]] std::wstring quoteArgument(std::wstring_view arg);
 
+// True when this process holds an elevated (administrator) token. Used to decide
+// whether firewall rules -- which need elevation to apply to the Windows Filtering
+// Platform -- require relaunching the stub elevated first.
+[[nodiscard]] bool isProcessElevated();
+
+// Relaunches this executable elevated via ShellExecuteExW with the "runas" verb,
+// forwarding `args` and preserving the working directory, then waits for the new
+// instance and returns its exit code. The elevated instance carries out the whole
+// run, so the caller returns this straight through.
+//
+// Returns ElevationFailed if the user declines the UAC prompt or the relaunch
+// cannot be started.
+[[nodiscard]] std::expected<int, Error> relaunchElevated(std::wstring_view exePath,
+                                                         std::wstring_view args);
+
 }  // namespace hnx

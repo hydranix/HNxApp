@@ -16,6 +16,7 @@
 #include <lz4hc.h>
 #include <zstd.h>
 
+#include "hash.hpp"
 #include "paths.hpp"
 
 namespace hnx::pack {
@@ -26,7 +27,7 @@ namespace {
     std::vector<std::byte> out(static_cast<std::size_t>(expectedSize));
     if (expectedSize == 0) return out;
 
-    HANDLE h = ::CreateFileW(extendedPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+    HANDLE h = ::CreateFileW(extendedPath.c_str(), GENERIC_READ, SOURCE_SHARE_MODE,
                              nullptr, OPEN_EXISTING,
                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
     if (h == INVALID_HANDLE_VALUE)
@@ -61,7 +62,7 @@ namespace {
     std::vector<std::byte> out(length);
     if (length == 0) return out;
 
-    HANDLE h = ::CreateFileW(extendedPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+    HANDLE h = ::CreateFileW(extendedPath.c_str(), GENERIC_READ, SOURCE_SHARE_MODE,
                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE)
         return std::unexpected(
@@ -154,7 +155,8 @@ std::expected<std::vector<std::byte>, Error> compressBlock(std::span<const std::
 
 std::expected<BuiltArchive, Error> buildArchive(const std::vector<SourceEntry>& entries,
                                                 const std::vector<PlannedBlock>& blocks,
-                                                const BuildOptions& opt, u64 buildId) {
+                                                const BuildOptions& opt, u64 buildId,
+                                                const BuildCallbacks& cb) {
     // Compress every block in parallel, then lay them out sequentially. The
     // layout has to be deterministic, so compression results are collected into
     // an indexed vector rather than appended as they finish.
@@ -180,45 +182,71 @@ std::expected<BuiltArchive, Error> buildArchive(const std::vector<SourceEntry>& 
     }
 
     std::atomic<std::size_t> next{0};
+    std::atomic<u64> bytesDone{0};
+    std::atomic<unsigned> running{0};
+    std::atomic<bool> abort{false};
     std::mutex errMutex;
     std::optional<Error> firstError;
+
+    u64 bytesTotal = 0;
+    for (const auto& b : blocks) bytesTotal += b.rawSize;
 
     const unsigned threads =
         std::max(1u, opt.threads ? opt.threads : std::thread::hardware_concurrency());
 
+    auto fail = [&](Error e) {
+        std::lock_guard lock(errMutex);
+        if (!firstError) firstError = std::move(e);
+        abort.store(true);
+    };
+
     auto worker = [&] {
         for (;;) {
-            {
-                std::lock_guard lock(errMutex);
-                if (firstError) return;
-            }
+            if (abort.load(std::memory_order_relaxed)) break;
             const std::size_t bi = next.fetch_add(1, std::memory_order_relaxed);
-            if (bi >= blocks.size()) return;
+            if (bi >= blocks.size()) break;
 
             const PlannedBlock& pb = blocks[bi];
             std::vector<std::byte> raw;
 
             if (pb.exclusive) {
+                // Not re-hashed here: the slices of one spanning file are spread
+                // across workers, so there is no single pass over its content.
+                // A verify of the finished package is what catches a large file
+                // that changed while it was being packed.
                 auto slice = readFileRange(entries[pb.spanningEntry].absPath,
                                            spanOffset[bi],
                                            static_cast<u32>(pb.rawSize));
                 if (!slice) {
-                    std::lock_guard lock(errMutex);
-                    if (!firstError) firstError = slice.error();
-                    return;
+                    fail(slice.error());
+                    break;
                 }
                 raw = std::move(*slice);
             } else {
                 raw.reserve(static_cast<std::size_t>(pb.rawSize));
+                bool ok = true;
                 for (const std::size_t mi : pb.members) {
                     auto content = readWholeFile(entries[mi].absPath, entries[mi].size);
                     if (!content) {
-                        std::lock_guard lock(errMutex);
-                        if (!firstError) firstError = content.error();
-                        return;
+                        fail(content.error());
+                        ok = false;
+                        break;
+                    }
+                    // Sources are read with every sharing mode granted, so a file
+                    // can be written to between the walk that hashed it and this
+                    // read. Packing it anyway would produce a TOC whose hash does
+                    // not match the bytes stored, which verification then reports
+                    // as corruption on every launch.
+                    if (hashBytes(*content) != entries[mi].hash) {
+                        fail(Error{Ec::SourceWalkFailed,
+                                   "file changed while it was being packed: " +
+                                       entries[mi].relPath});
+                        ok = false;
+                        break;
                     }
                     raw.insert(raw.end(), content->begin(), content->end());
                 }
+                if (!ok) break;
             }
 
             rawSize[bi] = static_cast<u32>(raw.size());
@@ -226,22 +254,37 @@ std::expected<BuiltArchive, Error> buildArchive(const std::vector<SourceEntry>& 
             Codec used = Codec::Store;
             auto packed = compressBlock(raw, opt.codec, opt.level, used);
             if (!packed) {
-                std::lock_guard lock(errMutex);
-                if (!firstError) firstError = packed.error();
-                return;
+                fail(packed.error());
+                break;
             }
             compressed[bi] = std::move(*packed);
             usedCodec[bi] = used;
+            bytesDone.fetch_add(pb.rawSize, std::memory_order_relaxed);
         }
+        running.fetch_sub(1);
     };
 
     {
         std::vector<std::jthread> pool;
         pool.reserve(threads);
+        running.store(threads);
         for (unsigned t = 0; t < threads; ++t) pool.emplace_back(worker);
+
+        // Compression is the long phase of a build -- minutes at high levels on a
+        // large tree -- so it reports progress. Both callbacks are serviced here,
+        // on the calling thread, the same way hashAll does it.
+        if (cb.progress || cb.cancelled) {
+            while (running.load() > 0) {
+                if (cb.isCancelled()) abort.store(true);
+                cb.step("Compressing", bytesDone.load(), bytesTotal);
+                ::Sleep(30);
+            }
+            cb.step("Compressing", bytesDone.load(), bytesTotal);
+        }
     }
 
     if (firstError) return std::unexpected(*firstError);
+    if (abort.load()) return std::unexpected(Error{Ec::CompressFailed, "cancelled"});
 
     // --- lay out blocks -----------------------------------------------------
     BuiltArchive built;

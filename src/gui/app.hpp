@@ -69,6 +69,10 @@ struct MetaFields {
     bool singleInstance = false;
     bool allowStubFlags = true;
 
+    bool firewallBlockOutbound = false;
+    bool firewallBlockInbound = false;
+    char firewallPrograms[1024]{};  // ;-separated, relative to the package root
+
     std::vector<std::pair<std::string, std::string>> env;
 };
 

@@ -19,6 +19,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
+static_assert(SOURCE_SHARE_MODE == (FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE));
+
 constexpr u64 fileTimeToU64(const FILETIME& ft) noexcept {
     return (static_cast<u64>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 }
@@ -38,7 +40,12 @@ constexpr u64 fileTimeToU64(const FILETIME& ft) noexcept {
 }
 
 [[nodiscard]] std::expected<u64, Error> hashOf(const std::wstring& extendedPath) {
-    HANDLE h = ::CreateFileW(extendedPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+    // Every sharing mode is granted: a source may be a folder under Program Files
+    // whose application is running and holds its own files open for writing, and
+    // packing it must still be able to read them. Nothing here ever writes to a
+    // source. A file that changes while it is being read is caught later, when
+    // buildArchive compares the content it compresses against this hash.
+    HANDLE h = ::CreateFileW(extendedPath.c_str(), GENERIC_READ, SOURCE_SHARE_MODE,
                              nullptr, OPEN_EXISTING,
                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
     if (h == INVALID_HANDLE_VALUE)
@@ -90,9 +97,55 @@ void collectImpliedDirs(std::string_view path, std::vector<std::string>& out) {
     }
 }
 
+// The exclusion list, folded and sorted once so each lookup is a binary search.
+//
+// Consulted during the walk rather than only afterwards, which matters for two
+// reasons. An excluded entry is never validated, so a junction or an unpackable
+// name inside a folder the user deliberately left out cannot fail the build. And
+// it is never hashed, so leaving out most of a large tree also leaves out most
+// of the cost of reading it.
+class ExclusionSet {
+public:
+    explicit ExclusionSet(std::span<const std::string> excluded) {
+        folded_.reserve(excluded.size());
+        for (const auto& e : excluded) folded_.push_back(fold(e));
+        std::sort(folded_.begin(), folded_.end());
+        folded_.erase(std::unique(folded_.begin(), folded_.end()), folded_.end());
+    }
+
+    // True when the path itself or any ancestor directory is excluded.
+    [[nodiscard]] bool covers(std::string_view relPath) const {
+        if (folded_.empty()) return false;
+        const std::string f = fold(relPath);
+        if (std::binary_search(folded_.begin(), folded_.end(), f)) return true;
+        for (std::size_t i = 0; i < f.size(); ++i) {
+            if (f[i] != '/') continue;
+            if (std::binary_search(folded_.begin(), folded_.end(),
+                                   std::string_view(f).substr(0, i)))
+                return true;
+        }
+        return false;
+    }
+
+private:
+    std::vector<std::string> folded_;
+
+    // ASCII-only, matching build.cpp: archive paths are compared the way Windows
+    // compares the ASCII range, and the separator is normalised.
+    [[nodiscard]] static std::string fold(std::string_view s) {
+        std::string out(s);
+        for (char& c : out) {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            if (c == '\\') c = '/';
+        }
+        return out;
+    }
+};
+
 std::expected<std::vector<SourceEntry>, Error> walkOneDirectory(
     const fs::path& root, std::string_view prefix, std::size_t sourceIndex,
-    bool allowUnsafePaths, std::vector<SourceEntry>& entries) {
+    bool allowUnsafePaths, const ExclusionSet& excluded,
+    std::vector<SourceEntry>& entries) {
     std::error_code ec;
 
     const fs::path rootAbs = fs::absolute(root, ec).lexically_normal();
@@ -125,6 +178,16 @@ std::expected<std::vector<SourceEntry>, Error> walkOneDirectory(
 
         SourceEntry e;
         e.relPath = applyPrefix(prefix, toArchivePath(rel));
+
+        // Before anything that can fail: an excluded entry is not part of the
+        // package, so nothing about it -- its name, its type, whether it can be
+        // read -- may stop the build. An excluded directory is not entered at all.
+        if (excluded.covers(e.relPath)) {
+            std::error_code dec;
+            if (de.is_directory(dec)) it.disable_recursion_pending();
+            continue;
+        }
+
         e.absPath = paths::toExtendedForm(de.path().wstring());
         e.sourceIndex = sourceIndex;
 
@@ -273,9 +336,11 @@ namespace {
 
 std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
     std::span<const SourceItem> items, unsigned threads, bool allowUnsafePaths,
-    const BuildCallbacks& cb) {
+    const BuildCallbacks& cb, std::span<const std::string> excludedPaths) {
     if (items.empty())
         return std::unexpected(Error{Ec::SourceWalkFailed, "nothing to package"});
+
+    const ExclusionSet excluded(excludedPaths);
 
     std::vector<SourceEntry> entries;
     std::vector<std::string> impliedDirs;
@@ -300,7 +365,7 @@ std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
 
         if (fs::is_directory(item.hostPath, ec)) {
             if (auto r = walkOneDirectory(item.hostPath, item.archivePrefix, i,
-                                          allowUnsafePaths, entries);
+                                          allowUnsafePaths, excluded, entries);
                 !r)
                 return std::unexpected(r.error());
         } else {
@@ -308,6 +373,7 @@ std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
             SourceEntry e;
             e.relPath = applyPrefix(item.archivePrefix,
                                     paths::narrow(item.hostPath.filename().wstring()));
+            if (excluded.covers(e.relPath)) continue;
             e.absPath = paths::toExtendedForm(fs::absolute(item.hostPath, ec).wstring());
             e.sourceIndex = i;
 
@@ -399,9 +465,9 @@ std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
 // than one that reports which path defeated it.
 std::expected<std::vector<SourceEntry>, Error> walkSources(
     std::span<const SourceItem> items, unsigned threads, bool allowUnsafePaths,
-    const BuildCallbacks& cb) {
+    const BuildCallbacks& cb, std::span<const std::string> excluded) {
     try {
-        return walkSourcesImpl(items, threads, allowUnsafePaths, cb);
+        return walkSourcesImpl(items, threads, allowUnsafePaths, cb, excluded);
     } catch (const fs::filesystem_error& e) {
         return std::unexpected(Error{Ec::SourceWalkFailed,
                                      std::string(e.what()) + " [" + e.path1().string() + "]"});

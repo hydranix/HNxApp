@@ -224,11 +224,15 @@ if(NOT HNX_STUB_ONLY)
     # which resolves the x86 toolset and SDK libraries itself. Doing this with
     # Ninja would mean reproducing the INCLUDE and LIB environment that VsDevCmd
     # sets up for a different target architecture, by hand.
+    #
+    # PROJECT_SOURCE_DIR rather than CMAKE_SOURCE_DIR, here and in every
+    # subdirectory: HNx App Creator builds this tree as a subproject, where
+    # CMAKE_SOURCE_DIR is the Creator's root and not this one.
     if(HNX_BUILD_X86_STUB)
         include(ExternalProject)
 
         ExternalProject_Add(hnxstub_x86
-            SOURCE_DIR       ${CMAKE_SOURCE_DIR}
+            SOURCE_DIR       ${PROJECT_SOURCE_DIR}
             BINARY_DIR       ${CMAKE_BINARY_DIR}/x86
             CMAKE_GENERATOR  "Visual Studio 18 2026"
             CMAKE_GENERATOR_PLATFORM Win32

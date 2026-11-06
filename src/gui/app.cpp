@@ -392,6 +392,9 @@ std::string App::buildMetaJson() const {
     s += std::string("  \"argPassthrough\": ") + (meta_.argPassthrough ? "true" : "false") + ",\n";
     s += std::string("  \"requireAdmin\": ") + (meta_.requireAdmin ? "true" : "false") + ",\n";
     s += std::string("  \"singleInstance\": ") + (meta_.singleInstance ? "true" : "false") + ",\n";
+    s += std::string("  \"firewallBlockOutbound\": ") + (meta_.firewallBlockOutbound ? "true" : "false") + ",\n";
+    s += std::string("  \"firewallBlockInbound\": ") + (meta_.firewallBlockInbound ? "true" : "false") + ",\n";
+    s += "  \"firewallPrograms\": \"" + jsonEscape(meta_.firewallPrograms) + "\",\n";
     s += std::string("  \"allowStubFlags\": ") + (meta_.allowStubFlags ? "true" : "false") + "\n";
     s += "}\n";
     return s;

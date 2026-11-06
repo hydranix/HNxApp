@@ -18,6 +18,7 @@ add_executable(hnxstub WIN32
     extract.cpp
     state.cpp
     launch.cpp
+    firewall.cpp
     ui.cpp
     winpe.cpp
     codec/codec.cpp
@@ -33,6 +34,8 @@ target_link_libraries(hnxstub PRIVATE
 
 # comctl32 is deliberately absent: ui.cpp loads it with LoadLibraryW so that an
 # image without it -- WinPE -- loses the progress bar rather than the process.
+# fwpuclnt is absent for the same reason: firewall.cpp loads it at runtime, so an
+# image without it loses firewall rules rather than failing to start at all.
 target_link_libraries(hnxstub PRIVATE
     kernel32 user32 shell32 advapi32 shlwapi
 )
@@ -55,7 +58,7 @@ add_custom_command(TARGET hnxstub POST_BUILD
     COMMAND ${CMAKE_COMMAND}
             -DSTUB_EXE=$<TARGET_FILE:hnxstub>
             -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-            -P ${CMAKE_SOURCE_DIR}/cmake/CheckStubSize.cmake
+            -P ${PROJECT_SOURCE_DIR}/cmake/CheckStubSize.cmake
     VERBATIM)
 
 # Collect this build's stub under an architecture-qualified name, ready for the
