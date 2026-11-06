@@ -284,4 +284,58 @@ std::expected<LaunchResult, Error> launch(const LaunchOptions& opt) {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Elevation
+// ---------------------------------------------------------------------------
+
+bool isProcessElevated() {
+    HANDLE token = nullptr;
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+
+    TOKEN_ELEVATION elevation{};
+    DWORD size = 0;
+    const BOOL ok = ::GetTokenInformation(token, TokenElevation, &elevation,
+                                          sizeof(elevation), &size);
+    ::CloseHandle(token);
+    return ok && elevation.TokenIsElevated != 0;
+}
+
+std::expected<int, Error> relaunchElevated(std::wstring_view exePath,
+                                           std::wstring_view args) {
+    const std::wstring file(exePath);
+    const std::wstring params(args);
+
+    // Preserve the working directory, which "runas" would otherwise reset to
+    // system32 -- an explicit --hnx-target= is resolved against it.
+    std::wstring cwd(32768, L'\0');
+    const DWORD n = ::GetCurrentDirectoryW(static_cast<DWORD>(cwd.size()), cwd.data());
+    if (n > 0 && n < cwd.size())
+        cwd.resize(n);
+    else
+        cwd.clear();
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    sei.lpVerb = L"runas";
+    sei.lpFile = file.c_str();
+    sei.lpParameters = params.empty() ? nullptr : params.c_str();
+    sei.lpDirectory = cwd.empty() ? nullptr : cwd.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (!::ShellExecuteExW(&sei))
+        return std::unexpected(
+            Error{Ec::ElevationFailed, "ShellExecuteExW runas", ::GetLastError()});
+
+    int exitCode = 0;
+    if (sei.hProcess) {
+        ::WaitForSingleObject(sei.hProcess, INFINITE);
+        DWORD code = 0;
+        ::GetExitCodeProcess(sei.hProcess, &code);
+        exitCode = static_cast<int>(code);
+        ::CloseHandle(sei.hProcess);
+    }
+    return exitCode;
+}
+
 }  // namespace hnx

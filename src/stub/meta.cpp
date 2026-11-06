@@ -351,6 +351,40 @@ std::expected<Metadata, Error> Metadata::parse(std::string_view json) {
             r = wantBool(m.singleInstance);
         } else if (key == "allowStubFlags") {
             r = wantBool(m.allowStubFlags);
+        } else if (key == "firewallBlockInbound") {
+            r = wantBool(m.firewall.blockInbound);
+        } else if (key == "firewallBlockOutbound") {
+            r = wantBool(m.firewall.blockOutbound);
+        } else if (key == "firewallPrograms") {
+            // A ';'-separated list of program paths inside the package. Kept as a
+            // single string so the existing scalar-only parser needs no array
+            // support. Each path is validated exactly like `exec`, since a
+            // metadata resource is as editable as the archive itself.
+            if (v.kind != JV::Kind::String)
+                return std::unexpected(Error{Ec::MetaFieldInvalid, "firewallPrograms must be a string"});
+            m.firewall.programs.clear();
+            const std::string& list = v.str;
+            std::size_t start = 0;
+            while (start <= list.size()) {
+                const std::size_t semi = list.find(';', start);
+                const std::size_t len =
+                    semi == std::string::npos ? list.size() - start : semi - start;
+                std::string piece = list.substr(start, len);
+                const std::size_t b = piece.find_first_not_of(" \t");
+                const std::size_t e = piece.find_last_not_of(" \t");
+                if (b != std::string::npos) {
+                    piece = piece.substr(b, e - b + 1);
+                    std::string norm = piece;
+                    for (auto& ch : norm)
+                        if (ch == '\\') ch = '/';
+                    if (auto vr = paths::validateArchivePath(norm); !vr)
+                        return std::unexpected(
+                            Error{Ec::MetaFieldInvalid, "firewallPrograms: " + vr.error().context});
+                    m.firewall.programs.push_back(paths::widen(piece));
+                }
+                if (semi == std::string::npos) break;
+                start = semi + 1;
+            }
         } else if (key == "env") {
             if (v.kind != JV::Kind::Object)
                 return std::unexpected(Error{Ec::MetaFieldInvalid, "env must be an object"});

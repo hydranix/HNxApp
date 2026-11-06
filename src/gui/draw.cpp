@@ -486,6 +486,21 @@ void App::drawLaunchTab() {
     hint("Lets users pass --hnx-info, --hnx-verify and so on. Turn off if the "
          "application has its own options that would clash.");
 
+    sectionHeading("Network");
+
+    ImGui::Checkbox("Block outbound connections", &meta_.firewallBlockOutbound);
+    ImGui::Checkbox("Block inbound connections", &meta_.firewallBlockInbound);
+    hint("Temporary firewall rules, added just before launch and removed by Windows "
+         "when the launcher exits. Needs administrator rights, so the package "
+         "prompts for elevation and waits for the app to close.");
+
+    if (meta_.firewallBlockOutbound || meta_.firewallBlockInbound) {
+        ImGui::Spacing();
+        field("Also block", meta_.firewallPrograms, sizeof(meta_.firewallPrograms),
+              "Other programs in the package to cover, such as an updater, "
+              "separated by ';'. The program to run is always included.");
+    }
+
     sectionHeading("Environment variables");
     hint("Set for the application only. %TARGET% and the other tokens expand here "
          "too.");

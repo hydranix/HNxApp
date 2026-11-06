@@ -24,6 +24,7 @@
 
 #include "error.hpp"
 #include "extract.hpp"
+#include "firewall.hpp"
 #include "hash.hpp"
 #include "launch.hpp"
 #include "meta.hpp"
@@ -211,6 +212,19 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
         return 0;
     }
 
+    const bool winPe = winpe::active();
+
+    // Firewall rules modify the Windows Filtering Platform, which requires an
+    // elevated process. When the package asks for them and we are not elevated,
+    // relaunch the stub elevated and let that instance carry out the whole run, so
+    // the work is never done twice. Skipped under WinPE (no firewall service, and
+    // everything already runs as SYSTEM) and for operations that never launch the
+    // application.
+    const bool willLaunch = !flags.info && !flags.extractOnly;
+    const bool applyFirewall = willLaunch && meta->firewall.active() && !winPe;
+    if (applyFirewall && !isProcessElevated())
+        return relaunchElevated(image->exePath(), tail);
+
     // --- resolve the target directory ---------------------------------------
     std::wstring exeDir{image->exePath()};
     if (const auto slash = exeDir.find_last_of(L'\\'); slash != std::wstring::npos)
@@ -222,8 +236,6 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
         .appId = meta->appId,
         .version = meta->appVersion,
     };
-
-    const bool winPe = winpe::active();
 
     std::wstring targetDir = flags.haveTarget
                                  ? paths::expandTokens(flags.target, tokens)
@@ -424,7 +436,11 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
     // there is nothing to elevate to and the request would only turn a launch
     // that would have worked into one that fails.
     opt.requireAdmin = meta->requireAdmin && !winPe;
-    opt.waitMode = meta->waitMode;
+    // Firewall rules live only as long as this process holds the WFP session open,
+    // so the stub must outlive the child to tear them down: a package with rules
+    // waits for the application even if it asked for waitMode none.
+    opt.waitMode = (applyFirewall && meta->waitMode == WaitMode::None) ? WaitMode::Wait
+                                                                       : meta->waitMode;
 
     for (const auto& e : meta->env)
         opt.env.push_back({e.name, paths::expandTokens(e.value, tokens)});
@@ -437,6 +453,29 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
     if (meta->argPassthrough && !childArgs.empty()) {
         opt.commandLine.push_back(L' ');
         opt.commandLine.append(childArgs);
+    }
+
+    // Apply the temporary firewall rules immediately before launch and hold the
+    // WFP session open across it. The session is dynamic, so the OS removes every
+    // rule when this process exits -- there is nothing to undo on the way out, and
+    // nothing persists if the stub is killed. We are elevated here: a non-elevated
+    // run relaunched itself above.
+    FirewallSession firewall;
+    if (applyFirewall) {
+        std::vector<std::wstring> programs;
+        programs.push_back(opt.exePath);
+        for (const auto& prog : meta->firewall.programs) {
+            auto p = paths::joinExtended(targetDir, [&] {
+                std::string s = paths::narrow(prog);
+                for (auto& c : s)
+                    if (c == '\\') c = '/';
+                return s;
+            }());
+            if (!p) return std::unexpected(p.error());
+            programs.push_back(paths::toDisplayForm(*p));
+        }
+        if (auto r = firewall.apply(meta->firewall, programs); !r)
+            return std::unexpected(r.error());
     }
 
     auto launched = launch(opt);

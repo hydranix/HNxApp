@@ -193,7 +193,8 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
         (opt.sources.size() == 1 ? " source" : " sources"));
 
     // --- walk ---------------------------------------------------------------
-    auto entries = walkSources(opt.sources, opt.threads, opt.allowUnsafePaths, cb);
+    auto entries =
+        walkSources(opt.sources, opt.threads, opt.allowUnsafePaths, cb, opt.excluded);
     if (!entries) return fail(entries.error());
 
     // --- exclusions ----------------------------------------------------------
@@ -325,7 +326,7 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
 
     const u64 buildId = makeBuildId();
 
-    auto archive = buildArchive(*entries, blocks, opt, buildId);
+    auto archive = buildArchive(*entries, blocks, opt, buildId, cb);
     if (!archive) return fail(archive.error());
 
     // --- assemble the output ------------------------------------------------

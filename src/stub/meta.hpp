@@ -43,6 +43,27 @@ struct EnvVar {
     std::wstring value;
 };
 
+// Temporary Windows firewall rules applied around the launched application.
+//
+// The rules are added through a WFP dynamic session the stub holds open for the
+// child's lifetime, so the OS removes them automatically when the stub exits --
+// cleanly, on a crash, or if it is killed. That is what makes them temporary
+// without any persistent cleanup to get wrong. Applying them needs an elevated
+// process, so a package that uses them relaunches itself elevated; see main.cpp.
+struct FirewallConfig {
+    bool blockInbound = false;
+    bool blockOutbound = false;
+
+    // Extra executables inside the package to cover beyond the entry point -- an
+    // updater or helper the application spawns. Paths are relative to the
+    // extracted tree and validated like `exec`. The entry point is always
+    // included when any blocking is on.
+    std::vector<std::wstring> programs;
+
+    // True when the config asks for anything that needs rules applied.
+    [[nodiscard]] bool active() const { return blockInbound || blockOutbound; }
+};
+
 struct Metadata {
     int schemaVersion = 1;
 
@@ -66,6 +87,8 @@ struct Metadata {
     VerifyMode verify = VerifyMode::Normal;
     UiMode ui = UiMode::Progress;
     int showWindow = 1;  // SW_SHOWNORMAL
+
+    FirewallConfig firewall;
 
     // Parses the UTF-8 JSON document in `json`.
     [[nodiscard]] static std::expected<Metadata, Error> parse(std::string_view json);

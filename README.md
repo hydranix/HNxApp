@@ -101,6 +101,65 @@ build\src\packer\hnxpack.exe build --src .\MyApp --out .\MyApp.exe --config app.
 | `ui` | `silent`, `progress`, `console` | progress window only appears if extraction runs past ~300 ms |
 | `requireAdmin` | bool | route the launch through the shell with the `runas` verb |
 | `argPassthrough` | bool | forward the stub's own arguments to the application |
+| `firewallBlockInbound` | bool | add a temporary rule blocking the app's inbound connections while it runs |
+| `firewallBlockOutbound` | bool | the same, for outbound connections |
+| `firewallPrograms` | string | extra executables in the package to cover too, `;`-separated and relative to the tree; the entry point is always included |
+
+### Temporary firewall rules
+
+A package can have the stub apply Windows firewall rules around the application
+and remove them when it exits:
+
+```json
+{
+  "firewallBlockOutbound": true,
+  "firewallBlockInbound": true,
+  "firewallPrograms": "bin\\updater.exe"
+}
+```
+
+`firewallBlockOutbound` and `firewallBlockInbound` block the entry point's
+outbound and inbound connections. `firewallPrograms` names extra executables
+inside the package to cover as well — an updater or helper the application spawns
+— as a `;`-separated list of paths relative to the extracted tree; the entry
+point itself is always included.
+
+The rules are added through a **WFP dynamic session** the stub holds open for the
+life of the application. A dynamic session is torn down by the OS the moment its
+handle closes, so the rules disappear when the stub exits — cleanly, on a crash,
+or if it is killed — and there is nothing persistent to clean up. They are WFP
+filters rather than classic rules, so they do not appear in the Windows Defender
+Firewall UI.
+
+Two things follow from this, both handled automatically:
+
+- **The stub waits for the application.** It has to outlive the child to hold the
+  rules, so a package with firewall rules behaves as `waitMode` wait even if it
+  asked for none.
+- **The stub elevates.** Modifying WFP needs administrator rights, so a package
+  with firewall rules relaunches itself with a UAC prompt when it is not already
+  elevated, and that elevated instance does the whole run.
+
+Under WinPE there is no firewall service and everything already runs as SYSTEM,
+so firewall rules are skipped there, the same way `requireAdmin` is.
+
+### Leaving things out, and reading sources
+
+`--exclude PATH` (repeatable) leaves a file or folder out of the package; a
+folder takes everything beneath it. Exclusions are applied **during** the walk,
+not after it: an excluded entry is never validated, hashed or read, so a junction
+or an unpackable name inside a folder you left out cannot fail the build, and
+leaving out most of a large tree also leaves out most of the cost of reading it.
+
+Sources are opened with every sharing mode granted, so a folder under Program
+Files can be packaged while its application runs and holds files open for
+writing. Nothing is ever written to a source. A file that changes between being
+hashed and being compressed fails the build rather than producing a package whose
+recorded hash does not match its contents.
+
+Compression reports progress and honours cancellation through `BuildCallbacks`,
+which is what lets HNx App Creator (a sibling project that builds this tree as a
+subproject) show a live progress bar for the longest phase of a build.
 
 ### Console windows
 

@@ -67,6 +67,11 @@ enum class Ec {
     ExecMissing,
     LaunchFailed,
 
+    // Firewall and elevation
+    FirewallUnavailable,
+    FirewallApplyFailed,
+    ElevationFailed,
+
     // Packer-side
     SourceWalkFailed,
     CompressFailed,
@@ -117,6 +122,9 @@ enum class Ec {
         case Ec::InsufficientSpace: return "not enough free space to unpack";
         case Ec::ExecMissing: return "primary executable is missing after extraction";
         case Ec::LaunchFailed: return "failed to launch the application";
+        case Ec::FirewallUnavailable: return "the Windows Filtering Platform is not available";
+        case Ec::FirewallApplyFailed: return "cannot apply the temporary firewall rules";
+        case Ec::ElevationFailed: return "administrator access is required to apply the firewall rules";
         case Ec::SourceWalkFailed: return "cannot read the source directory";
         case Ec::CompressFailed: return "compression failed";
         case Ec::ResourcePatchFailed: return "cannot write the HNXMETA resource";

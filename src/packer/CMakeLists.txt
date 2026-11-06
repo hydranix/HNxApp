@@ -24,15 +24,15 @@ add_library(hnxpack_core STATIC
     # Shared with the stub rather than duplicated. The packer must parse exactly
     # what the stub parses -- if these two ever drifted, hnxpack verify would be
     # validating a format nothing actually reads.
-    ${CMAKE_SOURCE_DIR}/src/stub/toc.cpp
-    ${CMAKE_SOURCE_DIR}/src/stub/selfmap.cpp
-    ${CMAKE_SOURCE_DIR}/src/stub/meta.cpp
-    ${CMAKE_SOURCE_DIR}/src/stub/codec/codec.cpp
+    ${PROJECT_SOURCE_DIR}/src/stub/toc.cpp
+    ${PROJECT_SOURCE_DIR}/src/stub/selfmap.cpp
+    ${PROJECT_SOURCE_DIR}/src/stub/meta.cpp
+    ${PROJECT_SOURCE_DIR}/src/stub/codec/codec.cpp
 )
 
 target_include_directories(hnxpack_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/src/stub)
+    ${PROJECT_SOURCE_DIR}/src/stub)
 
 target_link_libraries(hnxpack_core
     PUBLIC  hnx_common zstd_full lz4 xxhash

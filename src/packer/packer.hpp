@@ -181,15 +181,28 @@ struct BuildOptions {
 
 // --- walk.cpp ---------------------------------------------------------------
 
+// The sharing mode for every read of a source file: FILE_SHARE_READ |
+// FILE_SHARE_WRITE | FILE_SHARE_DELETE, spelled numerically so this header stays
+// free of <windows.h>.
+//
+// Granting everything is what lets a folder under Program Files be packaged while
+// its application is running and holds files open for writing. The packer only
+// ever reads a source; it never needs to stop anyone else from using it.
+inline constexpr unsigned long SOURCE_SHARE_MODE = 0x1 | 0x2 | 0x4;
+
 // Enumerates every source item into one archive namespace, validating each path
 // and hashing each file. Returns entries with directories before the files they
 // contain, which is what lets the stub create the tree in a single pass.
 //
 // Two items producing the same archive path is an error rather than a silent
 // overwrite: which one won would depend on enumeration order.
+//
+// `excluded` lists archive paths to leave out; excluding a directory excludes
+// everything under it. Excluded entries are skipped before they are validated or
+// hashed, so nothing about a left-out file can fail the walk or cost a read.
 [[nodiscard]] std::expected<std::vector<SourceEntry>, Error> walkSources(
     std::span<const SourceItem> items, unsigned threads, bool allowUnsafePaths,
-    const BuildCallbacks& cb = {});
+    const BuildCallbacks& cb = {}, std::span<const std::string> excluded = {});
 
 // Convenience wrapper for a single directory at the package root.
 [[nodiscard]] std::expected<std::vector<SourceEntry>, Error> walkSource(
@@ -220,9 +233,11 @@ struct BuiltArchive {
     Footer footer{};               // archiveOffset filled in by the caller
 };
 
+// Reports "Compressing" progress in raw bytes and honours cancellation through
+// `cb`, both serviced on the calling thread.
 [[nodiscard]] std::expected<BuiltArchive, Error> buildArchive(
     const std::vector<SourceEntry>& entries, const std::vector<PlannedBlock>& blocks,
-    const BuildOptions& opt, u64 buildId);
+    const BuildOptions& opt, u64 buildId, const BuildCallbacks& cb = {});
 
 // Compresses one buffer, falling back to Store when compression does not
 // actually help. A block of already-compressed content (PNG, ZIP, MP4) otherwise
