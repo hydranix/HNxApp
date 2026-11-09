@@ -10,6 +10,7 @@
 // round.
 
 #include <windows.h>
+#include "hnx_version.h"
 
 // ---------------------------------------------------------------------------
 // Manifest
@@ -45,8 +46,8 @@
 #endif
 
 VS_VERSION_INFO VERSIONINFO
-    FILEVERSION     0,1,0,0
-    PRODUCTVERSION  0,1,0,0
+    FILEVERSION     HNX_VERSION_RC
+    PRODUCTVERSION  HNX_VERSION_RC
     FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
     FILEFLAGS       0
     FILEOS          VOS_NT_WINDOWS32
@@ -59,11 +60,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "HNx"
             VALUE "FileDescription",  "HNx portable application"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileVersion",      HNX_VERSION_RC_STRING
             VALUE "InternalName",     "hnxstub"
             VALUE "OriginalFilename", "hnxstub.exe"
             VALUE "ProductName",      "HNx"
-            VALUE "ProductVersion",   "0.1.0.0"
+            VALUE "ProductVersion",   HNX_VERSION_RC_STRING
         END
     END
     BLOCK "VarFileInfo"

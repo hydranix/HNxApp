@@ -39,6 +39,31 @@ Run the tests:
 build\tests\hnx_tests.exe
 ```
 
+## Versions and releases
+
+The version is set in one place: `project(HNxApp VERSION x.y.z)` in the top-level
+`CMakeLists.txt`. CMake generates `hnx_version.h` from `cmake/hnx_version.h.in`,
+and that one header feeds `hnxpack --version`, the `HNxPacker` window title and
+the `VERSIONINFO` resources of `hnxpack.exe`, `HNxPacker.exe` and the stub, so
+Explorer's File and Product version always match. A packaged application does not
+show it: the packer replaces the stub's version information with the entry
+point's own.
+
+The version is not part of the on-disk format, and bumping it does not affect
+packages already built. Releases stay on `0.x` until the format is declared stable.
+
+To cut a release:
+
+1. Bump `VERSION` in `CMakeLists.txt` and commit it as `release: x.y.z`.
+2. Do a clean Release build and run the tests. Check that `hnxpack --version`
+   prints the new number.
+3. Tag the commit on `main` and push the tag:
+   `git tag -a vx.y.z -m "HNx App x.y.z"`, then `git push origin vx.y.z`.
+4. Publish the two programs. The stubs are embedded in both, so nothing else
+   ships:
+   `gh release create vx.y.z build/src/packer/hnxpack.exe build/src/gui/HNxPacker.exe --title "HNx App x.y.z" --notes-file NOTES.md`.
+   Never attach signing material.
+
 ## Packaging an application
 
 Run `hnxpack` with no arguments and it asks three questions:

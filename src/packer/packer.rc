@@ -1,4 +1,4 @@
-// hnxpack resources: the manifest only.
+// hnxpack resources: the manifest and version information.
 //
 // longPathAware is the load-bearing setting here. Without it std::filesystem
 // cannot walk a source tree containing paths past 260 characters, so the packer
@@ -7,3 +7,31 @@
 #include <windows.h>
 
 1 RT_MANIFEST "packer.manifest"
+
+#include "hnx_version.h"
+
+VS_VERSION_INFO VERSIONINFO
+    FILEVERSION     HNX_VERSION_RC
+    PRODUCTVERSION  HNX_VERSION_RC
+    FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+    FILEOS          VOS_NT_WINDOWS32
+    FILETYPE        VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "HNx"
+            VALUE "FileDescription",  "HNx packer"
+            VALUE "FileVersion",      HNX_VERSION_RC_STRING
+            VALUE "InternalName",     "hnxpack"
+            VALUE "OriginalFilename", "hnxpack.exe"
+            VALUE "ProductName",      "HNx"
+            VALUE "ProductVersion",   HNX_VERSION_RC_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

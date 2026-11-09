@@ -1,11 +1,12 @@
 // HNx Packer resources: the manifest, plus the stub payload added by CMake.
 #include <windows.h>
+#include "hnx_version.h"
 
 1 RT_MANIFEST "gui.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-    FILEVERSION     0,1,0,0
-    PRODUCTVERSION  0,1,0,0
+    FILEVERSION     HNX_VERSION_RC
+    PRODUCTVERSION  HNX_VERSION_RC
     FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
     FILEOS          VOS_NT_WINDOWS32
     FILETYPE        VFT_APP
@@ -16,11 +17,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "HNx"
             VALUE "FileDescription",  "HNx Packer"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileVersion",      HNX_VERSION_RC_STRING
             VALUE "InternalName",     "HNxPacker"
             VALUE "OriginalFilename", "HNxPacker.exe"
             VALUE "ProductName",      "HNx"
-            VALUE "ProductVersion",   "0.1.0.0"
+            VALUE "ProductVersion",   HNX_VERSION_RC_STRING
         END
     END
     BLOCK "VarFileInfo"

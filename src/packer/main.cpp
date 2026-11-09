@@ -25,6 +25,7 @@
 
 #include "codec/codec.hpp"
 #include "hash.hpp"
+#include "hnx_version.h"
 #include "meta.hpp"
 #include "packer.hpp"
 #include "paths.hpp"
@@ -210,7 +211,8 @@ void usage() {
         "                          arguments. Errors then appear as dialogs.\n"
         "\n"
         "  hnxpack inspect EXE   show payload details\n"
-        "  hnxpack verify  EXE   decompress everything and check hashes");
+        "  hnxpack verify  EXE   decompress everything and check hashes\n"
+        "  hnxpack --version     print the version");
 }
 
 }  // namespace
@@ -255,6 +257,11 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     const std::wstring cmd = argv[1];
+
+    if (cmd == L"--version") {
+        std::println("hnxpack {}", HNX_VERSION_STRING);
+        return 0;
+    }
 
     if (cmd == L"--help" || cmd == L"-h" || cmd == L"/?") {
         usage();

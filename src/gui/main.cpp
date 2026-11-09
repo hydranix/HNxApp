@@ -7,6 +7,7 @@
 // the GUI inherits the property that defines this whole project: one executable,
 // nothing to install.
 #include "app.hpp"
+#include "hnx_version.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -136,7 +137,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     wc.lpszClassName = L"HNxPackerWindow";
     ::RegisterClassExW(&wc);
 
-    HWND hwnd = ::CreateWindowExW(0, wc.lpszClassName, L"HNx Packer",
+    HWND hwnd = ::CreateWindowExW(0, wc.lpszClassName, L"HNx Packer " HNX_VERSION_WSTRING,
                                   WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                   1280, 820, nullptr, nullptr, inst, nullptr);
     if (!hwnd) return 1;

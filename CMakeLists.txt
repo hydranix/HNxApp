@@ -208,9 +208,14 @@ endif()
 # Project targets
 # ---------------------------------------------------------------------------
 
+# The version is set once, in project() above. hnx_version.h carries it to the
+# code and to every VERSIONINFO resource; rc sees it through the same include
+# path, so Explorer's File and Product version always match --version.
+configure_file(cmake/hnx_version.h.in ${PROJECT_BINARY_DIR}/generated/hnx_version.h @ONLY)
+
 add_library(hnx_common STATIC
     src/common/paths.cpp)
-target_include_directories(hnx_common PUBLIC src/common)
+target_include_directories(hnx_common PUBLIC src/common ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(hnx_common PUBLIC xxhash PRIVATE hnx_warnings)
 
 add_subdirectory(src/stub)
