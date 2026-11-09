@@ -85,8 +85,6 @@ public:
     void draw();
     void shutdown();
 
-    [[nodiscard]] bool isBuilding() const { return building_.load(); }
-
 private:
     // --- panels ---
     void drawToolbar();

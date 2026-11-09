@@ -37,7 +37,7 @@ target_link_libraries(hnxstub PRIVATE
 # fwpuclnt is absent for the same reason: firewall.cpp loads it at runtime, so an
 # image without it loses firewall rules rather than failing to start at all.
 target_link_libraries(hnxstub PRIVATE
-    kernel32 user32 shell32 advapi32 shlwapi
+    kernel32 user32 shell32 advapi32
 )
 
 target_include_directories(hnxstub PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -58,9 +58,7 @@ enum class Ec {
     SetTimeFailed,
     DecompressFailed,
     SizeMismatch,
-    HashMismatch,
     LockFailed,
-    TargetReadOnly,
     InsufficientSpace,
 
     // Launch
@@ -116,9 +114,7 @@ enum class Ec {
         case Ec::SetTimeFailed: return "cannot set file timestamp";
         case Ec::DecompressFailed: return "block failed to decompress";
         case Ec::SizeMismatch: return "decompressed size does not match the table of contents";
-        case Ec::HashMismatch: return "content hash does not match the table of contents";
         case Ec::LockFailed: return "cannot acquire the extraction lock";
-        case Ec::TargetReadOnly: return "target directory is not writable";
         case Ec::InsufficientSpace: return "not enough free space to unpack";
         case Ec::ExecMissing: return "primary executable is missing after extraction";
         case Ec::LaunchFailed: return "failed to launch the application";
