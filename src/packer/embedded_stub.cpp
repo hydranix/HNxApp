@@ -123,16 +123,16 @@ std::expected<void, Error> writeEmbeddedStub(StubArch arch,
 
     std::ofstream out(output, std::ios::binary | std::ios::trunc);
     if (!out)
-        return std::unexpected(Error{Ec::OutputWriteFailed, output.string()});
+        return std::unexpected(Error{Ec::OutputWriteFailed, paths::narrow(output.wstring())});
 
     out.write(reinterpret_cast<const char*>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     if (!out)
-        return std::unexpected(Error{Ec::OutputWriteFailed, output.string()});
+        return std::unexpected(Error{Ec::OutputWriteFailed, paths::narrow(output.wstring())});
 
     out.close();
     if (!out)
-        return std::unexpected(Error{Ec::OutputWriteFailed, output.string()});
+        return std::unexpected(Error{Ec::OutputWriteFailed, paths::narrow(output.wstring())});
 
     return {};
 }

@@ -367,6 +367,20 @@ void printInfo(const SelfImage& img, const Metadata& meta, const Toc& toc,
                         static_cast<unsigned>(result->bytesWritten / (1024 * 1024)));
             ui::writeConsoleLine(buf);
         }
+    } else if (!state.matches(image->footer().buildId, toc->entries().size())) {
+        // The tree is already correct but the state file is missing or names
+        // another build: an identical rebuild, or a state file deleted by hand.
+        // Without rewriting it here, nothing would ever write it again, so every
+        // later launch would repeat the full sweep and verify=fast would never
+        // engage. This happens once; the next warm launch matches and writes
+        // nothing. Best effort: a read-only target that is otherwise complete
+        // must still launch.
+        std::vector<StateRecord> records(toc->entries().size());
+        for (std::size_t i = 0; i < records.size(); ++i) {
+            const EntryDesc& e = toc->entries()[i];
+            records[i] = {e.size, e.mtime, e.hash};
+        }
+        (void)State::store(targetDir, image->footer().buildId, records);
     }
 
     // Orphan pruning happens under the lock, after any extraction, so a

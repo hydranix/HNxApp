@@ -73,6 +73,11 @@ For scripted builds:
 build\src\packer\hnxpack.exe build --src .\MyApp --out .\MyApp.exe --config app.json
 ```
 
+`--out` may not name one of the files being packaged; the build refuses rather
+than overwrite a source. Without `--config`, hnxpack generates metadata with
+`exec` set to `app.exe`, `appName` set to the first source's name, and `appId`
+set to that name sanitized the same way the interactive flow does it.
+
 `app.json` becomes the `HNXMETA` resource in the output:
 
 ```json
@@ -213,7 +218,9 @@ By default a package takes its icons **and** its `VERSIONINFO` from the entry
 point, so it looks like the application it contains rather than like a generic
 stub — the right icon in Explorer and the right name and version in Properties.
 The two travel together on purpose: copying only the icon produces something that
-looks right until someone opens Properties and sees the stub's details.
+looks right until someone opens Properties and sees the stub's details. When the
+entry point has version info, the stub's own placeholder is deleted rather than
+left beside it, whatever language the application's is in.
 
 `--icon-from FILE` takes them from somewhere else; `--no-icon` copies neither.
 An entry point with no resources of its own (a `.bat`, a bare console tool) is
@@ -305,7 +312,10 @@ Two rules keep this correct and are easy to break:
   timestamp check never matches and every launch re-hashes the whole tree.
 - `state.bin` is written **last**, and removed before the first write. A crash
   mid-extraction therefore leaves no state file, and the next run falls back to
-  full verification instead of trusting a half-written tree.
+  full verification instead of trusting a half-written tree. When the tree is
+  already current but `state.bin` is missing or names another build (an
+  identical rebuild, say), that one launch rewrites it, so the next launch is
+  back on the fast path.
 
 ## Layout
 

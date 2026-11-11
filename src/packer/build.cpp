@@ -91,11 +91,12 @@ namespace fs = std::filesystem;
     return out;
 }
 
-[[nodiscard]] std::string defaultMetadata(std::string_view appId, std::string_view exec) {
+[[nodiscard]] std::string defaultMetadata(std::string_view appId, std::string_view appName,
+                                          std::string_view exec) {
     std::string s = "{\n";
     s += "  \"schemaVersion\": 1,\n";
     s += "  \"appId\": \"" + jsonEscape(appId) + "\",\n";
-    s += "  \"appName\": \"" + jsonEscape(appId) + "\",\n";
+    s += "  \"appName\": \"" + jsonEscape(appName) + "\",\n";
     s += "  \"appVersion\": \"1.0\",\n";
     s += "  \"targetDir\": \"%LOCALAPPDATA%\\\\HNx\\\\%APPID%\\\\%VERSION%\",\n";
     s += "  \"exec\": \"" + jsonEscape(exec) + "\",\n";
@@ -157,7 +158,7 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
     // resolved and its own architecture read. Checking here would mean checking
     // for the wrong one.
     if (!opt.stub.empty() && !fs::exists(opt.stub))
-        return fail(Error{Ec::StubMissing, opt.stub.string()});
+        return fail(Error{Ec::StubMissing, paths::narrow(opt.stub.wstring())});
 
     if (opt.stub.empty() && !hasEmbeddedStub(StubArch::X64) &&
         !hasEmbeddedStub(StubArch::X86))
@@ -175,12 +176,19 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
     } else if (!opt.configFile.empty()) {
         bool ok = false;
         metaJson = readTextFile(opt.configFile, ok);
-        if (!ok) return fail(Error{Ec::MetaResourceMissing, opt.configFile.string()});
+        if (!ok) return fail(Error{Ec::MetaResourceMissing, paths::narrow(opt.configFile.wstring())});
     } else {
         std::println(stderr,
                      "hnxpack: no --config given; generating default metadata. "
                      "Pass --config to control targetDir, exec and launch behaviour.");
-        metaJson = defaultMetadata(opt.sources.front().hostPath.filename().string(),
+        // Named after the first source, looking through a trailing separator
+        // ("--src C:\MyApp\" has an empty filename). The appId is sanitized the
+        // way the interactive flow does it, because Metadata::parse refuses an
+        // empty or unsafe one and a raw folder name can be either.
+        fs::path src = opt.sources.front().hostPath;
+        if (src.filename().empty()) src = src.parent_path();
+        const std::string name = paths::narrow(src.filename().wstring());
+        metaJson = defaultMetadata(sanitizeAppId(name), name.empty() ? "app" : name,
                                    "app.exe");
     }
 
@@ -280,6 +288,25 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
                                         "point, and that it is not excluded)"});
     }
 
+    // The output must not be one of the files being packaged. Writing the stub
+    // over it would destroy a source, which packaging never does, and the
+    // archive would then hold content that no longer exists anywhere.
+    // Compared case-insensitively because NTFS paths are.
+    {
+        std::error_code aec;
+        const std::wstring outAbs =
+            paths::toExtendedForm(fs::absolute(opt.output, aec).lexically_normal().wstring());
+        for (const auto& e : *entries) {
+            if (e.isDir || e.absPath.empty()) continue;
+            if (::CompareStringOrdinal(e.absPath.c_str(), -1, outAbs.c_str(), -1, TRUE) ==
+                CSTR_EQUAL)
+                return fail(Error{Ec::OutputWriteFailed,
+                                  paths::narrow(opt.output.wstring()) +
+                                      " is one of the files being packaged; choose "
+                                      "another output path"});
+        }
+    }
+
     // --- stub architecture ---------------------------------------------------
     //
     // Matched to the entry point so a 32-bit application produces a package that
@@ -295,11 +322,11 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
         if (detected) {
             opt.arch = *detected;
             std::println("  arch: {} (matched to {})", stubArchName(opt.arch),
-                         resolvedExec.filename().string());
+                         paths::narrow(resolvedExec.filename().wstring()));
         } else {
             opt.arch = StubArch::X64;
             std::println("  arch: x64 (default; {} is not a PE image)",
-                         resolvedExec.filename().string());
+                         paths::narrow(resolvedExec.filename().wstring()));
         }
     }
 
@@ -339,7 +366,7 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
     } else {
         fs::copy_file(opt.stub, opt.output, fs::copy_options::overwrite_existing, ec);
         if (ec) return fail(Error{Ec::OutputWriteFailed, ec.message()});
-        say("  stub: " + opt.stub.filename().string());
+        say("  stub: " + paths::narrow(opt.stub.filename().wstring()));
     }
 
     // Icons come from the entry point by default, so a package looks like the
@@ -356,7 +383,7 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
         // icons of its own is common and fine, but the user should know why their
         // package came out blank.
         auto probe = readVersionStrings(iconSource);
-        say("  icons from " + iconSource.filename().string());
+        say("  icons from " + paths::narrow(iconSource.filename().wstring()));
         if (!probe.productName.empty() || !probe.fileVersion.empty())
             std::println("  version info: {} {}", paths::narrow(probe.productName),
                          paths::narrow(probe.fileVersion));
@@ -370,7 +397,7 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
 
     {
         std::ofstream out(opt.output, std::ios::binary | std::ios::app);
-        if (!out) return fail(Error{Ec::OutputWriteFailed, opt.output.string()});
+        if (!out) return fail(Error{Ec::OutputWriteFailed, paths::narrow(opt.output.wstring())});
         out.write(reinterpret_cast<const char*>(archive->bytes.data()),
                   static_cast<std::streamsize>(archive->bytes.size()));
         out.write(reinterpret_cast<const char*>(&archive->footer), sizeof(Footer));
@@ -387,7 +414,7 @@ int buildPackage(BuildOptions opt, const BuildCallbacks& cb) {
 
     std::println("  payload {} ({:.1f}% of raw)", humanBytes(archive->bytes.size()),
                  ratio * 100.0);
-    std::println("Wrote {} ({}) in {} ms", opt.output.string(), humanBytes(finalSize), ms);
+    std::println("Wrote {} ({}) in {} ms", paths::narrow(opt.output.wstring()), humanBytes(finalSize), ms);
 
     return 0;
 }

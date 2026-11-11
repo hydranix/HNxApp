@@ -229,7 +229,7 @@ void App::drawSources() {
                 ImGui::PushID(static_cast<int>(i));
 
                 ImGui::TableSetColumnIndex(0);
-                const std::string display = sources_[i].hostPath.string();
+                const std::string display = paths::narrow(sources_[i].hostPath.wstring());
                 ImGui::TextUnformatted(display.c_str());
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", display.c_str());
 

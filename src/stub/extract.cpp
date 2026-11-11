@@ -81,9 +81,17 @@ constexpr FILETIME u64ToFileTime(u64 v) noexcept {
 // read-only fails with ERROR_ACCESS_DENIED.
 [[nodiscard]] std::expected<Handle, Error> openForWrite(const std::wstring& path,
                                                         u64 sizeHint) {
+    // READONLY blocks the write. HIDDEN and SYSTEM block it too: CREATE_ALWAYS
+    // with FILE_ATTRIBUTE_NORMAL fails with ERROR_ACCESS_DENIED on an existing
+    // file carrying either, so re-extracting a hidden payload file failed.
+    // finalizeFile puts the TOC's attributes back afterwards.
+    constexpr DWORD blocking =
+        FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
     const DWORD attrs = ::GetFileAttributesW(path.c_str());
-    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY))
-        ::SetFileAttributesW(path.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & blocking)) {
+        const DWORD rest = attrs & ~blocking;
+        ::SetFileAttributesW(path.c_str(), rest ? rest : FILE_ATTRIBUTE_NORMAL);
+    }
 
     Handle h{::CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                            CREATE_ALWAYS,

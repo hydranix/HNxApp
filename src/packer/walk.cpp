@@ -149,13 +149,13 @@ std::expected<std::vector<SourceEntry>, Error> walkOneDirectory(
     std::error_code ec;
 
     const fs::path rootAbs = fs::absolute(root, ec).lexically_normal();
-    if (ec) return std::unexpected(Error{Ec::SourceWalkFailed, root.string()});
+    if (ec) return std::unexpected(Error{Ec::SourceWalkFailed, paths::narrow(root.wstring())});
 
     // skip_permission_denied keeps an unreadable subdirectory from aborting the
     // whole walk; a genuinely unreadable file still fails later when it is hashed.
     fs::recursive_directory_iterator it(
         rootAbs, fs::directory_options::skip_permission_denied, ec);
-    if (ec) return std::unexpected(Error{Ec::SourceWalkFailed, root.string()});
+    if (ec) return std::unexpected(Error{Ec::SourceWalkFailed, paths::narrow(root.wstring())});
 
     // Iterated with an explicit increment(ec) rather than a range-for.
     //
@@ -244,35 +244,43 @@ std::expected<std::vector<SourceEntry>, Error> walkOneDirectory(
         std::atomic<bool> abort{false};
 
         const unsigned n = std::max(1u, threads);
+        // Workers still running. The progress loop below waits on this rather
+        // than on the shared index: a worker that stops on an error never takes
+        // its final index, so waiting for the index to pass the end spun forever.
+        std::atomic<unsigned> running{n};
         std::vector<std::jthread> pool;
         pool.reserve(n);
 
-        for (unsigned t = 0; t < n; ++t) {
-            pool.emplace_back([&] {
-                for (;;) {
-                    if (abort.load(std::memory_order_relaxed)) return;
-                    const std::size_t k = next.fetch_add(1, std::memory_order_relaxed);
-                    if (k >= fileIdx.size()) return;
-                    {
-                        std::lock_guard lock(errMutex);
-                        if (firstError) return;
-                    }
-                    auto h = hashOf(entries[fileIdx[k]].absPath);
-                    if (!h) {
-                        std::lock_guard lock(errMutex);
-                        if (!firstError) firstError = h.error();
-                        return;
-                    }
-                    entries[fileIdx[k]].hash = *h;
-                    done.fetch_add(1, std::memory_order_relaxed);
+        auto worker = [&] {
+            for (;;) {
+                if (abort.load(std::memory_order_relaxed)) return;
+                const std::size_t k = next.fetch_add(1, std::memory_order_relaxed);
+                if (k >= fileIdx.size()) return;
+                {
+                    std::lock_guard lock(errMutex);
+                    if (firstError) return;
                 }
+                auto h = hashOf(entries[fileIdx[k]].absPath);
+                if (!h) {
+                    std::lock_guard lock(errMutex);
+                    if (!firstError) firstError = h.error();
+                    return;
+                }
+                entries[fileIdx[k]].hash = *h;
+                done.fetch_add(1, std::memory_order_relaxed);
+            }
+        };
+
+        for (unsigned t = 0; t < n; ++t)
+            pool.emplace_back([&] {
+                worker();
+                running.fetch_sub(1);
             });
-        }
 
         // Cancellation is polled here rather than in the workers so the callback
         // is only ever invoked from the calling thread.
         if (cb.cancelled || cb.progress) {
-            while (done.load() < fileIdx.size() && next.load() < fileIdx.size() + n) {
+            while (running.load() > 0) {
                 if (cb.isCancelled()) {
                     abort.store(true);
                     break;
@@ -353,7 +361,7 @@ std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
         std::error_code ec;
         if (!fs::exists(item.hostPath, ec))
             return std::unexpected(
-                Error{Ec::SourceWalkFailed, item.hostPath.string() + " no longer exists"});
+                Error{Ec::SourceWalkFailed, paths::narrow(item.hostPath.wstring()) + " no longer exists"});
 
         if (!item.archivePrefix.empty() && !allowUnsafePaths) {
             if (auto v = paths::validateArchivePath(item.archivePrefix); !v)
@@ -361,7 +369,7 @@ std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
                     Error{v.error().code, "target folder: " + item.archivePrefix});
         }
 
-        cb.note("Scanning " + item.hostPath.string());
+        cb.note("Scanning " + paths::narrow(item.hostPath.wstring()));
 
         if (fs::is_directory(item.hostPath, ec)) {
             if (auto r = walkOneDirectory(item.hostPath, item.archivePrefix, i,
@@ -423,21 +431,31 @@ std::expected<std::vector<SourceEntry>, Error> walkSourcesImpl(
 
     // A collision means two sources want the same archive path. Which one won
     // would depend on enumeration order, so refuse rather than pick.
+    //
+    // Compared case-insensitively, the way NTFS compares names: "App.dll" from
+    // one source and "app.dll" from another are one file once extracted.
     {
-        std::vector<const SourceEntry*> sorted;
+        struct Keyed {
+            std::wstring key;
+            const SourceEntry* e;
+        };
+        std::vector<Keyed> sorted;
         sorted.reserve(entries.size());
-        for (const auto& e : entries) sorted.push_back(&e);
+        for (const auto& e : entries) sorted.push_back({paths::widen(e.relPath), &e});
+        auto cmp = [](const Keyed& a, const Keyed& b) {
+            return ::CompareStringOrdinal(a.key.c_str(), static_cast<int>(a.key.size()),
+                                          b.key.c_str(), static_cast<int>(b.key.size()),
+                                          TRUE);
+        };
         std::sort(sorted.begin(), sorted.end(),
-                  [](const SourceEntry* a, const SourceEntry* b) {
-                      return a->relPath < b->relPath;
-                  });
+                  [&](const Keyed& a, const Keyed& b) { return cmp(a, b) == CSTR_LESS_THAN; });
         for (std::size_t i = 1; i < sorted.size(); ++i) {
-            if (sorted[i]->relPath != sorted[i - 1]->relPath) continue;
+            if (cmp(sorted[i], sorted[i - 1]) != CSTR_EQUAL) continue;
             // Two directories at the same path are the same directory.
-            if (sorted[i]->isDir && sorted[i - 1]->isDir) continue;
+            if (sorted[i].e->isDir && sorted[i - 1].e->isDir) continue;
             return std::unexpected(Error{
                 Ec::SourceWalkFailed,
-                "two sources both want to place " + sorted[i]->relPath +
+                "two sources both want to place " + sorted[i].e->relPath +
                     " in the package; give one of them a different target folder"});
         }
     }
@@ -470,7 +488,7 @@ std::expected<std::vector<SourceEntry>, Error> walkSources(
         return walkSourcesImpl(items, threads, allowUnsafePaths, cb, excluded);
     } catch (const fs::filesystem_error& e) {
         return std::unexpected(Error{Ec::SourceWalkFailed,
-                                     std::string(e.what()) + " [" + e.path1().string() + "]"});
+                                     std::string(e.what()) + " [" + paths::narrow(e.path1().wstring()) + "]"});
     } catch (const std::exception& e) {
         return std::unexpected(Error{Ec::SourceWalkFailed, e.what()});
     }

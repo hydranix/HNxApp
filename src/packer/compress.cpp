@@ -181,6 +181,24 @@ std::expected<BuiltArchive, Error> buildArchive(const std::vector<SourceEntry>& 
         }
     }
 
+    // EntryDesc::blockSpan is 16 bits, so a file may span at most 65535 blocks.
+    // Past that the count wrapped and the TOC described the file as living in
+    // one block, which the stub rejects at launch. Checked before compressing,
+    // because the only files that can hit it are tens of gigabytes.
+    {
+        std::size_t run = 0;
+        for (std::size_t i = 0; i < blocks.size(); ++i) {
+            const bool continues = i > 0 && blocks[i].exclusive && blocks[i - 1].exclusive &&
+                                   blocks[i].spanningEntry == blocks[i - 1].spanningEntry;
+            run = blocks[i].exclusive ? (continues ? run + 1 : 1) : 0;
+            if (run > UINT16_MAX)
+                return std::unexpected(Error{
+                    Ec::CompressFailed,
+                    entries[blocks[i].spanningEntry].relPath +
+                        " needs more than 65535 blocks; use a larger --block-size"});
+        }
+    }
+
     std::atomic<std::size_t> next{0};
     std::atomic<u64> bytesDone{0};
     std::atomic<unsigned> running{0};

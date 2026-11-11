@@ -154,3 +154,75 @@ HNX_TEST(walk_excludes_a_single_file_source) {
     if (!r) return;
     HNX_CHECK(r->empty());
 }
+
+// A file that cannot be read while a GUI is watching progress. The progress loop
+// used to wait for the shared index to run past the end, which a worker that
+// stopped on an error never advances, so the build hung instead of failing.
+HNX_TEST(walk_reports_a_hash_failure_while_progress_is_watched) {
+    ScratchTree t;
+    t.file(L"a.txt");
+    t.file(L"locked.txt");
+
+    // No sharing: the walk can still stat the file but cannot open it.
+    HANDLE lock = ::CreateFileW(paths::toExtendedForm((t.root() / L"locked.txt").wstring()).c_str(),
+                                GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                nullptr);
+    HNX_CHECK(lock != INVALID_HANDLE_VALUE);
+
+    // The cancel hook doubles as a watchdog so a regression fails rather than
+    // hanging the whole suite.
+    const ULONGLONG start = ::GetTickCount64();
+    bool watchdogFired = false;
+    BuildCallbacks cb;
+    cb.progress = [](std::string_view, u64, u64) {};
+    cb.cancelled = [&] {
+        if (::GetTickCount64() - start < 10'000) return false;
+        watchdogFired = true;
+        return true;
+    };
+
+    const SourceItem src{t.root(), {}};
+    auto r = walkSources({&src, 1}, 1, false, cb);
+    ::CloseHandle(lock);
+
+    HNX_CHECK(!r.has_value());
+    HNX_CHECK(!watchdogFired);
+}
+
+// NTFS names are case-insensitive, so these two land on the same file.
+HNX_TEST(walk_rejects_sources_that_differ_only_in_case) {
+    ScratchTree t;
+    t.file(L"one\\App.dll");
+    t.file(L"two\\app.dll");
+
+    const std::vector<SourceItem> srcs{{t.root() / L"one", {}},
+                                       {t.root() / L"two" / L"app.dll", {}}};
+    auto r = walkSources(srcs, 1, false);
+    HNX_CHECK(!r.has_value());
+}
+
+HNX_TEST(walk_allows_directories_that_differ_only_in_case) {
+    ScratchTree t;
+    fs::create_directories(t.root() / L"one" / L"Data");
+    fs::create_directories(t.root() / L"two" / L"data");
+    t.file(L"one\\Data\\a.txt");
+    t.file(L"two\\data\\b.txt");
+
+    const std::vector<SourceItem> srcs{{t.root() / L"one", {}}, {t.root() / L"two", {}}};
+    auto r = walkSources(srcs, 1, false);
+    HNX_CHECK(r.has_value());
+}
+
+// A source name outside the ANSI code page. This test process has no UTF-8
+// activeCodePage manifest, which is the situation on Windows 8.1 and early
+// Windows 10 for hnxpack too: fs::path::string() threw there and failed the walk.
+HNX_TEST(walk_accepts_a_source_name_outside_the_ansi_code_page) {
+    ScratchTree t;
+    t.file(L"\x65E5\x672C\\a.txt");
+
+    const SourceItem src{t.root() / L"\x65E5\x672C", {}};
+    auto r = walkSources({&src, 1}, 1, false);
+    HNX_CHECK(r.has_value());
+    if (!r) return;
+    HNX_CHECK(hasEntry(*r, "a.txt"));
+}

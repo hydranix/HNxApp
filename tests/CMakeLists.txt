@@ -13,6 +13,7 @@ add_executable(hnx_tests
     test_winpe.cpp
     test_walk.cpp
     test_meta.cpp
+    test_resources.cpp
 
     ${PROJECT_SOURCE_DIR}/src/stub/meta.cpp
     ${PROJECT_SOURCE_DIR}/src/stub/winpe.cpp
@@ -23,6 +24,8 @@ add_executable(hnx_tests
     ${PROJECT_SOURCE_DIR}/src/packer/cmdline.cpp
     ${PROJECT_SOURCE_DIR}/src/packer/walk.cpp
     ${PROJECT_SOURCE_DIR}/src/packer/console.cpp
+    ${PROJECT_SOURCE_DIR}/src/packer/icons.cpp
+    ${PROJECT_SOURCE_DIR}/src/packer/patch_rsrc.cpp
 )
 
 target_link_libraries(hnx_tests PRIVATE hnx_common zstd_full lz4 xxhash hnx_warnings)

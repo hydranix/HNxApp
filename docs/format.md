@@ -276,7 +276,9 @@ Structural bounds are checked with the same severity:
 
 ## 7. State file
 
-Written to `<targetDir>/.hnx/state.bin` **after** all extraction completes.
+Written to `<targetDir>/.hnx/state.bin` **after** all extraction completes. A
+launch that finds nothing to extract also writes it when the existing file is
+missing or names a different buildId; that write is best effort.
 
 ```
 magic        u8[8]   "HNXSTATE"

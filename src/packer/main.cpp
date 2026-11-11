@@ -16,6 +16,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cerrno>
+#include <cwchar>
 #include <filesystem>
 #include <optional>
 #include <print>
@@ -88,7 +90,7 @@ int fail(const Error& e) {
 
 int cmdInspect(const fs::path& exe) {
     MappedFile mf;
-    if (!mf.open(exe)) return fail(Error{Ec::SelfOpenFailed, exe.string()});
+    if (!mf.open(exe)) return fail(Error{Ec::SelfOpenFailed, paths::narrow(exe.wstring())});
 
     auto f = footerOf(mf.bytes());
     if (!f) return fail(f.error());
@@ -98,7 +100,7 @@ int cmdInspect(const fs::path& exe) {
     auto toc = Toc::parse(archive, *f);
     if (!toc) return fail(toc.error());
 
-    std::println("file            : {}", exe.string());
+    std::println("file            : {}", paths::narrow(exe.wstring()));
     std::println("format version  : {}", f->formatVersion);
     std::println("buildId         : {:016x}", f->buildId);
     std::println("stub size       : {}", humanBytes(f->archiveOffset));
@@ -124,7 +126,7 @@ int cmdInspect(const fs::path& exe) {
 
 int cmdVerify(const fs::path& exe) {
     MappedFile mf;
-    if (!mf.open(exe)) return fail(Error{Ec::SelfOpenFailed, exe.string()});
+    if (!mf.open(exe)) return fail(Error{Ec::SelfOpenFailed, paths::narrow(exe.wstring())});
 
     auto f = footerOf(mf.bytes());
     if (!f) return fail(f.error());
@@ -309,10 +311,30 @@ int wmain(int argc, wchar_t** argv) {
             }
             else if (a == L"--icon-from") opt.iconSource = next(i);
             else if (a == L"--no-icon") opt.noIcon = true;
-            else if (a == L"--threads") opt.threads = std::stoul(next(i));
-            else if (a == L"--level") opt.level = std::stoi(next(i));
-            else if (a == L"--block-size") {
-                const auto mb = std::stoul(next(i));
+            else if (a == L"--threads" || a == L"--level" || a == L"--block-size") {
+                // Parsed without std::stoul/stoi: they throw on a missing or
+                // non-numeric value, nothing catches it, and "--threads x" ended
+                // the process with an abort rather than a usage error. Only
+                // --level may be negative (zstd's fast levels).
+                const std::wstring v = next(i);
+                wchar_t* endp = nullptr;
+                errno = 0;
+                const long n = std::wcstol(v.c_str(), &endp, 10);
+                if (v.empty() || *endp != L'\0' || errno == ERANGE ||
+                    (n < 0 && a != L"--level")) {
+                    std::println(stderr, "{} needs a number, got \"{}\"", paths::narrow(a),
+                                 paths::narrow(v));
+                    return 2;
+                }
+                if (a == L"--threads") {
+                    opt.threads = static_cast<unsigned>(n);
+                    continue;
+                }
+                if (a == L"--level") {
+                    opt.level = static_cast<int>(n);
+                    continue;
+                }
+                const auto mb = static_cast<unsigned long>(n);
                 opt.blockSize = static_cast<u32>(
                     std::clamp<unsigned long>(mb, 1, MAX_BLOCK_RAW / (1024 * 1024)) *
                     1024 * 1024);
