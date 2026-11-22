@@ -2,6 +2,7 @@
 //
 // JSON rather than a packed struct: the packer emits it trivially, it survives
 // inspection and hand-patching in Resource Hacker, and unknown keys are ignorable
+// Alternative: Resource Cracker https://www.pelock.com/products/resource-cracker
 // so a newer packer can add fields without breaking an older stub.
 //
 // The parser is hand-written (see meta.cpp) instead of using nlohmann or glaze.
